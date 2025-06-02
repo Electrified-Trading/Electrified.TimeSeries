@@ -216,13 +216,13 @@ function Build-TaggedOutput($Tag, $BuildPath) {
         }
 
         # Clean up worktree
-        # if (Test-Path $worktreePath) {
-        #     Write-ActionInfo "Cleaning up worktree..."
-        #     git worktree remove $worktreePath --force 2>$null | Out-Null
-        #     if ($LASTEXITCODE -ne 0) {
-        #         Write-ActionWarning "Failed to remove worktree at $worktreePath - manual cleanup may be needed"
-        #     }
-        # }
+        if (Test-Path $worktreePath) {
+            Write-ActionInfo "Cleaning up worktree..."
+            git worktree remove $worktreePath --force 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-ActionWarning "Failed to remove worktree at $worktreePath - manual cleanup may be needed"
+            }
+        }
     }
 }
 
