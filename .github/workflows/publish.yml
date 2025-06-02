@@ -1,0 +1,89 @@
+name: Build and Publish NuGet Package
+
+on:
+  push:
+    branches: [ "main", "develop", "feature/*", "hotfix/*" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+
+env:
+  DOTNET_VERSION: '9.0.x'
+  PROJECT_PATH: 'source/Electrified.TimeSeries/Electrified.TimeSeries.csproj'
+  PACKAGE_OUTPUT_DIRECTORY: ${{ github.workspace }}/output
+  NUGET_SOURCE_URL: 'https://nuget.pkg.github.com/Electrified-Trading/index.json'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # Needed for versioning
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build
+      run: dotnet build --configuration Release --no-restore
+
+    - name: Test
+      run: dotnet test --configuration Release --no-build --verbosity normal
+
+    # Generate version for preview packages (non-tag pushes)
+    - name: Generate Preview Version
+      if: github.ref_type != 'tag'
+      run: |
+        # Get UTC date in format YYYYMMDD
+        $utcDate = (Get-Date).ToUniversalTime().ToString("yyyyMMdd")
+        # Get short commit SHA
+        $shortSha = "${{ github.sha }}".Substring(0, 7)
+        # Create preview version: base version + preview suffix
+        $previewVersion = "1.0.0-preview.$utcDate.sha$shortSha"
+        echo "PACKAGE_VERSION=$previewVersion" >> $env:GITHUB_ENV
+        echo "Preview version: $previewVersion"
+      shell: pwsh
+
+    # Extract version from tag (tag pushes)
+    - name: Extract Release Version
+      if: github.ref_type == 'tag'
+      run: |
+        # Remove 'v' prefix from tag (e.g., v1.0.0 -> 1.0.0)
+        $tagVersion = "${{ github.ref_name }}" -replace '^v', ''
+        echo "PACKAGE_VERSION=$tagVersion" >> $env:GITHUB_ENV
+        echo "Release version: $tagVersion"
+      shell: pwsh
+
+    - name: Pack NuGet Package
+      run: |
+        dotnet pack ${{ env.PROJECT_PATH }} \
+          --configuration Release \
+          --no-build \
+          --include-symbols \
+          --include-source \
+          --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
+          -p:PackageVersion=${{ env.PACKAGE_VERSION }}
+
+    # Only publish on pushes (not PRs) and when build succeeds
+    - name: Publish to GitHub Packages
+      if: github.event_name == 'push'
+      run: |
+        dotnet nuget push "${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg" \
+          --source ${{ env.NUGET_SOURCE_URL }} \
+          --api-key ${{ secrets.GITHUB_TOKEN }} \
+          --skip-duplicate
+
+    # Upload package artifacts for inspection
+    - name: Upload Package Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: nuget-packages
+        path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg
+        retention-days: 30
