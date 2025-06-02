@@ -27,7 +27,8 @@
 param(
     [string]$ProjectPath = "source/Electrified.TimeSeries/Electrified.TimeSeries.csproj",
     [string]$TagName = "",
-    [string]$OutputDir = "workflow-comparison"
+    [string]$OutputDir = "workflow-comparison",
+    [switch]$Debug = $false
 )
 
 Set-StrictMode -Version Latest
@@ -57,6 +58,12 @@ function Write-ActionResult($Message, $Color = "White") {
     Write-Host ""
     Write-Host "RESULT: $Message" -ForegroundColor $Color -BackgroundColor Black
     Write-Host ""
+}
+
+function Write-DebugInfo($Message) {
+    if ($Debug) {
+        Write-Host "[DEBUG] $Message" -ForegroundColor Magenta
+    }
 }
 
 function Get-LastTag {
@@ -152,6 +159,7 @@ function Build-TaggedOutput($Tag, $BuildPath) {
     $currentBranch = git branch --show-current 2>$null
     $hasUncommittedChanges = $null -ne (git status --porcelain 2>$null)
     
+    # Fix the git stash comment around line 156
     if ($hasUncommittedChanges) {
         Write-ActionInfo "Stashing uncommitted changes..."
         git stash push -m "Auto-stash for build comparison" | Out-Null
@@ -167,6 +175,18 @@ function Build-TaggedOutput($Tag, $BuildPath) {
         
         # Build and hash the tagged version
         $taggedResult = Build-AndHashOutput $BuildPath "tagged ($Tag)"
+        
+        if($Debug) {
+            Write-DebugInfo "taggedResult type: $($taggedResult.GetType().Name)"
+            Write-DebugInfo "taggedResult.CombinedHash exists: $($null -ne $taggedResult.CombinedHash)"
+            if ($taggedResult -is [array]) {
+                Write-DebugInfo "It's an array with $($taggedResult.Count) elements"
+                for ($i = 0; $i -lt $taggedResult.Count; $i++) {
+                    Write-DebugInfo "Element $i type: $($taggedResult[$i].GetType().Name)"
+                }
+            }
+        }
+        
         return $taggedResult
     }
     finally {
@@ -256,10 +276,22 @@ try {
     
     # Build current output
     $currentResult = Build-AndHashOutput $currentOutputPath "current"
-    
-    # Build tagged output
+      # Build tagged output
     $taggedResult = Build-TaggedOutput $targetTag $taggedOutputPath
     
+    if($Debug) {
+        Write-DebugInfo "After Build-TaggedOutput call:"
+        Write-DebugInfo "taggedResult type: $($taggedResult.GetType().Name)"
+        Write-DebugInfo "taggedResult is array: $($taggedResult -is [array])"
+        if ($taggedResult -is [array]) {
+            Write-DebugInfo "Array has $($taggedResult.Count) elements"
+            Write-DebugInfo "First element type: $($taggedResult[0].GetType().Name)"
+            Write-DebugInfo "First element has CombinedHash: $($null -ne $taggedResult[0].CombinedHash)"
+        } else {
+            Write-DebugInfo "Has CombinedHash: $($null -ne $taggedResult.CombinedHash)"
+        }
+    }
+
     Write-ActionSuccess "Built and analyzed both versions:"
     Write-Host "  Current: $($currentResult.FileCount) files" -ForegroundColor Gray
     Write-Host "  Tagged:  $($taggedResult.FileCount) files" -ForegroundColor Gray
@@ -289,6 +321,7 @@ try {
     }
     
 } catch {
+    if($Debug) { throw $_ }
     Write-ActionError "Build comparison failed: $_"
     Write-ActionWarning "Failing safe: assuming changes exist to prevent missed releases"
     Write-ActionResult "PUBLISH_NEEDED (Safety Fallback)" "Red"
