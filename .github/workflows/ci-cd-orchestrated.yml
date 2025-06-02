@@ -145,7 +145,6 @@ jobs:  # 🔍 Phase 1: Change Detection & Strategy Planning
       cleanup-old-packages: ${{ github.event_name == 'release' }}
     secrets:
       NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
   # 📊 Phase 6: Pipeline Summary
   pipeline-summary:
