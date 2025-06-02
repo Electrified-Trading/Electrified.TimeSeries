@@ -32,14 +32,43 @@ jobs:
       run: dotnet restore
 
     - name: Build Debug
-      run: dotnet build --configuration Debug --no-restore
-
+      run: dotnet build --configuration Debug --no-restore  
     - name: Build Release  
       if: github.ref_type == 'tag'
       run: dotnet build --configuration Release --no-restore
 
     - name: Test
       run: dotnet test --configuration Debug --no-build --verbosity normal
+
+    # Check for meaningful changes (only for non-tag pushes)
+    - name: Check for Code Changes
+      if: github.ref_type != 'tag'
+      id: changes
+      run: |
+        # Get the latest tag
+        $latestTag = git describe --tags --abbrev=0 2>$null
+        
+        if (-not $latestTag) {
+          echo "No previous tags found - this will be the first release"
+          echo "has_changes=true" >> $env:GITHUB_OUTPUT
+          exit 0
+        }
+        
+        echo "Latest tag: $latestTag"
+        
+        # Check for changes in source code (exclude version bumps, docs, build artifacts)
+        $changes = git diff --name-only "$latestTag..HEAD" -- . ':!*.csproj' ':!scripts/' ':!*.md' ':!change-log/' ':!bin/' ':!obj/' ':!test-output/' ':!.github/'
+        
+        if ($changes) {
+          echo "Found meaningful changes since $latestTag:"
+          $changes | ForEach-Object { echo "  - $_" }
+          echo "has_changes=true" >> $env:GITHUB_OUTPUT
+        } else {
+          echo "No meaningful code changes detected since $latestTag"
+          echo "Skipping package publication to avoid duplicate releases"
+          echo "has_changes=false" >> $env:GITHUB_OUTPUT
+        }
+      shell: pwsh
 
     # Generate version suffix for preview packages (non-tag pushes)
     - name: Generate Preview Version Suffix
@@ -65,7 +94,7 @@ jobs:
         echo "Release version: $tagVersion"
       shell: pwsh    # Pack with version suffix for preview builds (Debug only)
     - name: Pack NuGet Package (Preview - Debug)
-      if: github.ref_type != 'tag'
+      if: github.ref_type != 'tag' && steps.changes.outputs.has_changes == 'true'
       run: |
         dotnet pack ${{ env.PROJECT_PATH }} \
           --configuration Debug \
@@ -94,13 +123,19 @@ jobs:
           --configuration Debug \
           --no-build \
           --include-symbols \
-          --include-source \
-          --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
+          --include-source \          --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
           -p:PackageVersion=${{ env.PACKAGE_VERSION }}-debug
 
-    # Only publish on pushes (not PRs) and when build succeeds
+    # Skip packaging message for preview builds without changes
+    - name: Skip Package Creation (No Changes)
+      if: github.ref_type != 'tag' && steps.changes.outputs.has_changes == 'false'
+      run: |
+        echo "⏭️ Skipping package creation - no meaningful code changes detected"
+        echo "This prevents duplicate preview packages for version bumps and documentation changes"
+
+    # Only publish on pushes (not PRs) and when there are meaningful changes or it's a tag
     - name: Publish to GitHub Packages
-      if: github.event_name == 'push'
+      if: github.event_name == 'push' && (github.ref_type == 'tag' || steps.changes.outputs.has_changes == 'true')
       run: |
         dotnet nuget push "${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg" \
           --source ${{ env.NUGET_SOURCE_URL }} \
