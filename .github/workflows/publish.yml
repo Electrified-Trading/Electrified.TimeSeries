@@ -32,12 +32,16 @@ jobs:
       run: dotnet restore
 
     - name: Build Debug
-      run: dotnet build --configuration Debug --no-restore    - name: Build Release
+      run: dotnet build --configuration Debug --no-restore
+
+    - name: Build Release
       if: github.ref_type == 'tag'
       run: dotnet build --configuration Release --no-restore
 
     - name: Test
-      run: dotnet test --configuration Debug --no-build --verbosity normal    # Build Output Hash Comparison - Proven deterministic approach for .NET CI/CD
+      run: dotnet test --configuration Debug --no-build --verbosity normal
+
+    # Build Output Hash Comparison - Proven deterministic approach for .NET CI/CD
     - name: Smart Change Detection (Build Output Comparison)
       if: github.ref_type != 'tag'
       id: changes
@@ -46,38 +50,47 @@ jobs:
         $projectPath = "${{ env.PROJECT_PATH }}"
         
         if (-not (Test-Path $scriptPath)) {
-          echo "⚠️ Build comparison script not found at $scriptPath"
-          echo "📦 Assuming changes exist to be safe"
+          Write-Host "::error::Build comparison script not found at $scriptPath"
+          Write-Host "::warning::Assuming changes exist to be safe"
           echo "has_changes=true" >> $env:GITHUB_OUTPUT
           exit 0
         }
         
         try {
-          echo "🔍 Running deterministic build output comparison..."
-          echo "📁 Project: $projectPath"
+          Write-Host "::notice::🔍 Running deterministic build output comparison..."
+          Write-Host "::notice::📁 Project: $projectPath"
           
-          # Execute the build output comparison script
-          $result = & $scriptPath -ProjectPath $projectPath -OutputDir "workflow-build-comparison"
+          # Execute the build output comparison script in CI mode
+          & $scriptPath -Mode CI -ProjectPath $projectPath -OutputDir "workflow-build-comparison"
+          $exitCode = $LASTEXITCODE
           
-          if ($LASTEXITCODE -eq 0) {
-            echo "✅ Build outputs are identical"
-            echo "⏭️ No functional changes detected - skipping package creation"
+          if ($exitCode -eq 0) {
+            Write-Host "::notice::✅ Build outputs are identical"
+            Write-Host "::notice::⏭️ No functional changes detected - skipping package creation"
             echo "has_changes=false" >> $env:GITHUB_OUTPUT
-          } elseif ($LASTEXITCODE -eq 1) {
-            echo "🔄 Functional changes detected in build output"
-            echo "📦 Will create new package version"
+          } elseif ($exitCode -eq 1) {
+            Write-Host "::notice::🔄 Functional changes detected in build output"
+            Write-Host "::notice::📦 Will create new package version"
             echo "has_changes=true" >> $env:GITHUB_OUTPUT
           } else {
-            echo "⚠️ Build comparison failed with exit code: $LASTEXITCODE"
-            echo "📦 Assuming changes exist to be safe"
+            Write-Host "::error::Build comparison failed with exit code: $exitCode"
+            Write-Host "::warning::Assuming changes exist to be safe"
             echo "has_changes=true" >> $env:GITHUB_OUTPUT
-          }
-        } catch {
-          echo "⚠️ Error during build comparison: $_"
-          echo "📦 Assuming changes exist to be safe"
+          }        } catch {
+          Write-Host "::error::Error during build comparison: $_"
+          Write-Host "::warning::Assuming changes exist to be safe"
           echo "has_changes=true" >> $env:GITHUB_OUTPUT
         }
       shell: pwsh
+
+    # Upload build comparison artifacts for debugging (when comparison runs)
+    - name: Upload Build Comparison Artifacts
+      if: github.ref_type != 'tag' && always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-comparison-artifacts
+        path: workflow-build-comparison/
+        retention-days: 7
 
     # Generate version suffix for preview packages (non-tag pushes)
     - name: Generate Preview Version Suffix
