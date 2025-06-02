@@ -306,13 +306,13 @@ try {
     $comparison = Compare-ContentHashes $currentResult $taggedResult
     
     if ($comparison.Identical) {
-        Write-ActionSuccess "Build outputs are identical!"
+        Write-ActionInfo "Build outputs are SAME"
         Write-ActionInfo "No functional changes detected between current code and $targetTag"
         Write-ActionInfo "CI/CD will skip package publishing to avoid duplicate versions"
         Write-ActionResult "SKIP_PUBLISH (No Changes)" "Green"
         exit 0  # Signal no changes
     } else {
-        Write-ActionWarning "Build outputs differ!"
+        Write-ActionInfo "Build outputs are DIFFERENT"
         Write-ActionInfo "Functional changes detected between current code and $targetTag"
         
         if ($comparison.CurrentFileCount -ne $comparison.TaggedFileCount) {
