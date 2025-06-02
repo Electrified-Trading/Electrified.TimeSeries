@@ -54,9 +54,6 @@ on:
       NUGET_API_KEY:
         description: 'NuGet API key for publishing'
         required: true
-      GITHUB_TOKEN:
-        description: 'GitHub token for package operations'
-        required: true
       
   workflow_dispatch:
     inputs:
