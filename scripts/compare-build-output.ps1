@@ -381,20 +381,28 @@ function Invoke-MainExecution {
     try {
         Write-ActionInfo "Starting functional change detection via build output comparison..."
         Write-ActionInfo "Mode: $Mode | Project: $ProjectPath"
-        
-        # Ensure we're in a git repository
+          # Ensure we're in a git repository
         if (-not (Test-Path ".git")) {
             Write-ActionError "Not in a git repository root"
-            exit 2
+            
+            if ($IsCI) {
+                return 2  # Configuration error in CI mode
+            } else {
+                exit 2  # Configuration error in Local mode
+            }
         }
         
         # Get target tag
         $targetTag = if ($TagName) { $TagName } else { Get-LastTag }
-        
-        if (-not $targetTag) {
+          if (-not $targetTag) {
             Write-ActionWarning "No previous tags found - this appears to be the first release"
             Write-ActionResult "PUBLISH_NEEDED (First Release)" "Green"
-            exit 1  # Signal changes detected (first release)
+            
+            if ($IsCI) {
+                return 1  # Signal changes detected (first release) in CI mode
+            } else {
+                exit 1  # Signal changes detected (first release) in Local mode
+            }
         }
         
         Write-ActionInfo "Comparing against tag: $targetTag"
@@ -439,15 +447,20 @@ function Invoke-MainExecution {
         Write-ActionGroup "🔍 Hash Comparison & Decision" {
             # Compare hashes
             $comparison = Compare-ContentHashes $currentResult $taggedResult
-            
-            if ($comparison.Identical) {
+              if ($comparison.Identical) {
                 Write-ActionInfo "Build outputs are SAME"
                 Write-ActionInfo "No functional changes detected between current code and $targetTag"
                 Write-ActionInfo "CI/CD will skip package publishing to avoid duplicate versions"
                 Write-ActionResult "SKIP_PUBLISH (No Changes)" "Green"
-                exit 0  # Signal no changes
+                
+                if ($IsCI) {
+                    return 0  # Signal no changes in CI mode
+                } else {
+                    exit 0  # Signal no changes in Local mode
+                }
             } else {
-                Write-ActionInfo "Build outputs are DIFFERENT"                Write-ActionInfo "Functional changes detected between current code and $targetTag"
+                Write-ActionInfo "Build outputs are DIFFERENT"
+                Write-ActionInfo "Functional changes detected between current code and $targetTag"
                 
                 if ($comparison.CurrentFileCount -ne $comparison.TaggedFileCount) {
                     $fileDiff = $comparison.CurrentFileCount - $comparison.TaggedFileCount
@@ -457,21 +470,37 @@ function Invoke-MainExecution {
                 
                 Write-ActionInfo "CI/CD will create and publish new package version"
                 Write-ActionResult "PUBLISH_NEEDED (Changes Detected)" "Yellow"
-                exit 1  # Signal changes detected
+                
+                if ($IsCI) {
+                    return 1  # Signal changes detected in CI mode
+                } else {
+                    exit 1  # Signal changes detected in Local mode
+                }
             }
         }
-        
-    } catch {
+          } catch {
         if($Debug) { 
             Write-ActionError "Debug mode: re-throwing exception for investigation"
             throw $_ 
-                }
+        }
         Write-ActionError "Build comparison failed: $_"
         Write-ActionWarning "Failing safe: assuming changes exist to prevent missed releases"
         Write-ActionResult "PUBLISH_NEEDED (Safety Fallback)" "Red"
-        exit 1  # Fail safe: assume changes exist
+        
+        if ($IsCI) {
+            return 1  # Fail safe: assume changes exist in CI mode
+        } else {
+            exit 1  # Fail safe: assume changes exist in Local mode
+        }
     }
 }
 
 # Execute main function
-Invoke-MainExecution
+if ($IsCI) {
+    # In CI mode, capture return value and exit with it
+    $result = Invoke-MainExecution
+    exit $result
+} else {
+    # In Local mode, let function handle exit directly
+    Invoke-MainExecution
+}
