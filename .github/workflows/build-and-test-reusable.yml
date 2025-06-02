@@ -1,0 +1,113 @@
+name: Build and Test (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      configuration:
+        description: 'Build configuration (Debug or Release)'
+        required: false
+        type: string
+        default: 'Debug'
+      run-tests:
+        description: 'Whether to run tests'
+        required: false
+        type: boolean
+        default: true
+      dotnet-version:
+        description: '.NET version to use'
+        required: false
+        type: string
+        default: '9.0.x'
+    outputs:
+      build-successful:
+        description: 'Whether the build was successful'
+        value: ${{ jobs.build-and-test.outputs.build-successful }}
+      test-successful:
+        description: 'Whether tests were successful'
+        value: ${{ jobs.build-and-test.outputs.test-successful }}
+
+env:
+  PROJECT_PATH: 'source/Electrified.TimeSeries/Electrified.TimeSeries.csproj'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    outputs:
+      build-successful: ${{ steps.build-result.outputs.success }}
+      test-successful: ${{ steps.test-result.outputs.success }}
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # Needed for versioning and git operations
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+
+    - name: Restore Dependencies
+      run: dotnet restore
+
+    - name: Build Project
+      id: build
+      run: |
+        echo "🔨 Building project in ${{ inputs.configuration }} configuration..."
+        if dotnet build --configuration ${{ inputs.configuration }} --no-restore --verbosity normal; then
+          echo "✅ Build completed successfully"
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Build failed"
+          echo "success=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    - name: Build Result
+      id: build-result
+      run: echo "success=${{ steps.build.outputs.success }}" >> $GITHUB_OUTPUT
+
+    - name: Run Tests
+      id: test
+      if: inputs.run-tests
+      run: |
+        echo "🧪 Running tests..."
+        if dotnet test --configuration ${{ inputs.configuration }} --no-build --verbosity normal; then
+          echo "✅ All tests passed"
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Tests failed"
+          echo "success=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    - name: Test Result
+      id: test-result
+      if: inputs.run-tests
+      run: echo "success=${{ steps.test.outputs.success }}" >> $GITHUB_OUTPUT
+
+    - name: Skip Tests Result
+      id: test-skip-result
+      if: "!inputs.run-tests"
+      run: echo "success=true" >> $GITHUB_OUTPUT
+
+    - name: Build Summary
+      run: |
+        echo "## Build & Test Summary" >> $GITHUB_STEP_SUMMARY
+        echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Build (${{ inputs.configuration }}) | ${{ steps.build.outputs.success == 'true' && '✅ Success' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ inputs.run-tests }}" = "true" ]; then
+          echo "| Tests | ${{ steps.test.outputs.success == 'true' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "| Tests | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+        fi

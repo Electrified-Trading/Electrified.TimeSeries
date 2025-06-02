@@ -37,43 +37,56 @@ jobs:
       run: dotnet build --configuration Release --no-restore
 
     - name: Test
-      run: dotnet test --configuration Debug --no-build --verbosity normal    # Build Output Hash Comparison - Proven deterministic approach for .NET CI/CD
-    - name: Smart Change Detection (Build Output Comparison)
+      run: dotnet test --configuration Debug --no-build --verbosity normal    # Clean Package Hash Comparison - Industry standard for .NET CI/CD
+    - name: Smart Change Detection (Package Hash Comparison)
       if: github.ref_type != 'tag'
       id: changes
       run: |
-        $scriptPath = "scripts/compare-build-output.ps1"
+        # Get the latest tag
+        $latestTag = git describe --tags --abbrev=0 2>$null
+        
+        if (-not $latestTag) {
+          echo "No previous tags found - this will be the first release"
+          echo "has_changes=true" >> $env:GITHUB_OUTPUT
+          exit 0
+        }
+        
+        echo "Latest tag: $latestTag"
+        
+        # Use clean package comparison for accurate functional change detection
+        $scriptPath = "scripts/compare-clean-packages-v2.ps1"
         $projectPath = "${{ env.PROJECT_PATH }}"
         
         if (-not (Test-Path $scriptPath)) {
-          echo "⚠️ Build comparison script not found at $scriptPath"
+          echo "⚠️ Package comparison script not found at $scriptPath"
           echo "📦 Assuming changes exist to be safe"
           echo "has_changes=true" >> $env:GITHUB_OUTPUT
           exit 0
         }
         
         try {
-          echo "🔍 Running deterministic build output comparison..."
+          echo "🔍 Running clean package hash comparison..."
           echo "📁 Project: $projectPath"
+          echo "🏷️ Comparing against tag: $latestTag"
           
-          # Execute the build output comparison script
-          $result = & $scriptPath -ProjectPath $projectPath -OutputDir "workflow-build-comparison"
+          # Execute the package comparison script
+          $result = & $scriptPath -ProjectPath $projectPath -TagName $latestTag -OutputDir "workflow-package-comparison"
           
           if ($LASTEXITCODE -eq 0) {
-            echo "✅ Build outputs are identical"
+            echo "✅ Clean package comparison completed successfully"
             echo "⏭️ No functional changes detected - skipping package creation"
             echo "has_changes=false" >> $env:GITHUB_OUTPUT
           } elseif ($LASTEXITCODE -eq 1) {
-            echo "🔄 Functional changes detected in build output"
+            echo "🔄 Functional changes detected in package content"
             echo "📦 Will create new package version"
             echo "has_changes=true" >> $env:GITHUB_OUTPUT
           } else {
-            echo "⚠️ Build comparison failed with exit code: $LASTEXITCODE"
+            echo "⚠️ Package comparison failed with exit code: $LASTEXITCODE"
             echo "📦 Assuming changes exist to be safe"
             echo "has_changes=true" >> $env:GITHUB_OUTPUT
           }
         } catch {
-          echo "⚠️ Error during build comparison: $_"
+          echo "⚠️ Error during package comparison: $_"
           echo "📦 Assuming changes exist to be safe"
           echo "has_changes=true" >> $env:GITHUB_OUTPUT
         }

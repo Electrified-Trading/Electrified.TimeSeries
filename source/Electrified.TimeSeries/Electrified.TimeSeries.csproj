@@ -1,8 +1,15 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>    <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+      <!-- Deterministic and reproducible builds for consistent hash comparison -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <DebugType>embedded</DebugType>
+    <!-- Exclude source file timestamps from PDB for deterministic builds -->
+    <PathMap>$(MSBuildProjectDirectory)=.</PathMap>
     <!-- NuGet Package Metadata -->
     <PackageId>Electrified.TimeSeries</PackageId>
     <VersionPrefix>1.0.1</VersionPrefix>

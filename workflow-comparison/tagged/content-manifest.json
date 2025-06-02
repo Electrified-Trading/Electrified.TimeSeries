@@ -1,0 +1,11 @@
+{
+  "CombinedHash": "A57683AAC4B1FF8D6500BDC96CBAFF791CFE3F3864B221A1AC1A8D926A8DED13",
+  "FileHashes": {
+    "Electrified-Trading\\Electrified.TimeSeries\\source\\Electrified.TimeSeries\\bin\\Debug\\net9.0\\Electrified.TimeSeries.deps.json": "B77356D18C2B039E7B8E9A2118F5864A257ED97465885A0E7013D6FA8856FE2C",
+    "Electrified-Trading\\Electrified.TimeSeries\\source\\Electrified.TimeSeries\\bin\\Debug\\net9.0\\Electrified.TimeSeries.dll": "BF57B0E467D1D36C3FB921DA9DB7631A678CEB2798B7AECF16AD6DAC05463A9F",
+    "Electrified-Trading\\Electrified.TimeSeries\\source\\Electrified.TimeSeries\\bin\\Debug\\net9.0\\Electrified.TimeSeries.xml": "0A13886EF4446087BF9CB31A7CE26555AC31D5DCD156602A87E75D9C1A135A0E",
+    "Electrified-Trading\\Electrified.TimeSeries\\source\\Electrified.TimeSeries\\bin\\Debug\\net9.0\\Electrified.TimeSeries.pdb": "A4BE986C69DDAE2D200E85BCC8E3F045BCDED0F2183055472E185342C586D979"
+  },
+  "Timestamp": "2025-06-01T22:22:22Z",
+  "BuildDescription": "tagged (v1.0.1)"
+}

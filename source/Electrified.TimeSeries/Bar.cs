@@ -14,9 +14,7 @@ public record Bar<T> : IComparable<Bar<T>>
 	/// <summary>
 	/// Gets the financial data of the bar.
 	/// </summary>
-	public required T Data { get; init; }
-
-	/// <summary>
+	public required T Data { get; init; }	/// <summary>
 	/// Gets the trading volume of the bar.
 	/// </summary>
 	public required decimal Volume { get; init; }
