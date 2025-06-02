@@ -67,7 +67,7 @@ jobs:
         } catch {
           Write-Host "::error::Error during build comparison: $_"
           Write-Host "::warning::Assuming changes exist to be safe"
-          echo "has-changes=true" >> $env:GITHUB_OUTPUT
+          echo "has_changes=true" >> $env:GITHUB_OUTPUT
         }
       shell: pwsh
 
@@ -103,23 +103,22 @@ jobs:
         echo "PACKAGE_VERSION=$tagVersion" >> $env:GITHUB_ENV
         echo "Release version: $tagVersion"
       shell: pwsh
-
     # Pack with version suffix for preview builds (Debug only)
     - name: Pack NuGet Package (Preview - Debug)
       if: github.ref_type != 'tag' && steps.changes.outputs.has_changes == 'true'
       run: |
+        mkdir -p ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
         dotnet pack ${{ env.PROJECT_PATH }} \
           --configuration Debug \
           --no-build \
           --include-symbols \
           --include-source \
           --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
-          --version-suffix ${{ env.VERSION_SUFFIX }}
-
-    # Pack release builds (Release + Debug with -debug suffix)
+          --version-suffix ${{ env.VERSION_SUFFIX }}    # Pack release builds (Release + Debug with -debug suffix)
     - name: Pack NuGet Package (Release)
       if: github.ref_type == 'tag'
       run: |
+        mkdir -p ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
         dotnet pack ${{ env.PROJECT_PATH }} \
           --configuration Release \
           --no-build \
@@ -131,6 +130,7 @@ jobs:
     - name: Pack NuGet Package (Release - Debug)
       if: github.ref_type == 'tag'
       run: |
+        mkdir -p ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
         dotnet pack ${{ env.PROJECT_PATH }} \
           --configuration Debug \
           --no-build \
