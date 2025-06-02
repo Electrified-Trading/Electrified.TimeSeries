@@ -14,3 +14,6 @@ if ($env:GITHUB_ACTIONS -eq "true") {
     # Load Terminal logging module for local development
     $LoggingModule = Join-Path $ModulesPath "Logging-Terminal.psm1"
 }
+
+Import-Module $LoggingModule -Force
+Remove-Variable LoggingModule
