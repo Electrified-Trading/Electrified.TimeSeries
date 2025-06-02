@@ -27,29 +27,13 @@ $ErrorActionPreference = 'Stop'
 # Import shared logging module
 . (Join-Path $PSScriptRoot "Import-LoggingModule.ps1")
 
+# Import shared modules
+Import-Module (Join-Path $PSScriptRoot "modules" "Git-Operations.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "modules" "Project-Version.psm1") -Force
+
 # Configuration
 $ProjectPath = "source/Electrified.TimeSeries/Electrified.TimeSeries.csproj"
 $TestOutputPath = "test-output"
-
-function Get-ProjectVersion {
-    $content = Get-Content $ProjectPath -Raw
-    if ($content -match '<VersionPrefix>([^<]+)</VersionPrefix>') {
-        return $matches[1]
-    }
-    throw "Could not find VersionPrefix in $ProjectPath"
-}
-
-function Get-LastTag {
-    try {
-        $lastTag = git describe --tags --abbrev=0 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            return $lastTag.Trim()
-        }
-    } catch {
-        # No tags found
-    }
-    return $null
-}
 
 function Build-CurrentPackage($Version, $OutputPath) {
     Write-Info "Building current package version $Version..."
@@ -151,14 +135,11 @@ function Compare-PackageHashes($CurrentPackage, $TaggedPackage) {
 # Main execution
 try {
     Write-Info "Starting package hash comparison test..."
-    
-    # Ensure we're in a git repository
-    if (-not (Test-Path ".git")) {
-        throw "Not in a git repository root"
-    }
+      # Ensure we're in a git repository
+    Assert-GitRepository
     
     # Get current version and last tag
-    $currentVersion = Get-ProjectVersion
+    $currentVersion = Get-ProjectVersion $ProjectPath
     $lastTag = Get-LastTag
     
     Write-Info "Current version: $currentVersion"

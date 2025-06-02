@@ -61,6 +61,9 @@ $ErrorActionPreference = 'Stop'
 # Import shared logging module
 . (Join-Path $PSScriptRoot "Import-LoggingModule.ps1")
 
+# Import Git operations module
+Import-Module (Join-Path $PSScriptRoot "modules" "Git-Operations.psm1") -Force
+
 # Determine if we're in CI mode
 $IsCI = $Mode -eq "CI" -or $env:GITHUB_ACTIONS -eq "true"
 
@@ -73,18 +76,6 @@ function Write-DetailedProgress($Activity, $Status = "In Progress") {
     } else {
         #Write-Info "$Activity"
     }
-}
-
-function Get-LastTag {
-    try {
-        $lastTag = git describe --tags --abbrev=0 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            return $lastTag.Trim()
-        }
-    } catch {
-        # No tags found
-    }
-    return $null
 }
 
 function Build-AndHashOutput($BuildPath, $Description = "build") {
@@ -179,25 +170,9 @@ function Build-TaggedOutput($Tag, $BuildPath) {
     $originalLocation = Get-Location
     
     try {
-        # Ensure .git/.wt directory exists
-        $wtBaseDir = Join-Path (Get-Location) ".git/.wt"
-        if (-not (Test-Path $wtBaseDir)) {
-            New-Item -ItemType Directory -Path $wtBaseDir -Force | Out-Null
-        }
-
-        # Remove existing worktree if it exists (cleanup from previous runs)
-        if (Test-Path $worktreePath) {
-            Write-Info "Cleaning up existing worktree for $Tag..."
-            git worktree remove $worktreePath --force 2>$null | Out-Null
-        }
-
-        # Create worktree for the tag
-        Write-Info "Creating worktree at .git/.wt/$Tag..."
-        git worktree add $worktreePath $Tag --quiet 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to create worktree for tag $Tag. Tag may not exist."
-        }
-
+        # Create worktree using Git-Operations module
+        New-GitWorktree $worktreePath $Tag
+        
         if ($Debug) {
             Write-Debug "Worktree created successfully at: $worktreePath"
             Write-Debug "Switching to worktree directory for build"
@@ -223,14 +198,8 @@ function Build-TaggedOutput($Tag, $BuildPath) {
             Pop-Location
         }
 
-        # Clean up worktree
-        if (Test-Path $worktreePath) {
-            Write-Info "Cleaning up worktree..."
-            git worktree remove $worktreePath --force 2>$null | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "Failed to remove worktree at $worktreePath - manual cleanup may be needed"
-            }
-        }
+        # Clean up worktree using Git-Operations module
+        Remove-GitWorktree $worktreePath
     }
 }
 
@@ -293,9 +262,13 @@ function Invoke-MainExecution {
     try {
         Write-Info "Starting functional change detection via build output comparison..."
         Write-Info "Mode: $Mode | Project: $ProjectPath"
-          # Ensure we're in a git repository
-        if (-not (Test-Path ".git")) {
-            Write-Error "Not in a git repository root"
+        
+        # Ensure we're in a git repository
+        Assert-GitRepository
+        
+        # Validate project file
+        if (-not (Test-Path $ProjectPath)) {
+            Write-Error "Project file not found: $ProjectPath"
             
             if ($IsCI) {
                 return 2  # Configuration error in CI mode

@@ -28,27 +28,15 @@ $ErrorActionPreference = 'Stop'
 # Import shared logging module
 . (Join-Path $PSScriptRoot "Import-LoggingModule.ps1")
 
-function Get-LastTag {
-    try {
-        $lastTag = git describe --tags --abbrev=0 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            return $lastTag.Trim()
-        }
-    } catch {
-        # No tags found
-    }
-    return $null
-}
+# Import Git operations module
+Import-Module (Join-Path $PSScriptRoot "modules" "Git-Operations.psm1") -Force
 
 # Main execution
 try {
     Write-Info "Starting git-based functional change detection..."
     
     # Ensure we're in a git repository
-    if (-not (Test-Path ".git")) {
-        Write-Error "Not in a git repository root"
-        exit 2
-    }
+    Assert-GitRepository -ExitOnError
     
     # Get target tag
     $targetTag = if ($TagName) { $TagName } else { Get-LastTag }
@@ -66,22 +54,11 @@ try {
         "source/**/*.csproj", 
         "tests/**/*.cs",
         "tests/**/*.csproj"
-    )
-      # Check for changes in meaningful files since the tag
+    )    # Check for changes in meaningful files since the tag
     Write-Info "Checking for functional code changes..."
     
-    $hasChanges = $false
-    $changedFiles = @()
-    
-    foreach ($pattern in $meaningfulPatterns) {
-        # Use git diff to find changed files matching the pattern
-        $files = git diff --name-only "$targetTag...HEAD" -- $pattern 2>$null
-        
-        if ($files -and $files.Trim()) {
-            $changedFiles += $files -split "`n" | Where-Object { $_.Trim() }
-            $hasChanges = $true
-        }
-    }
+    $changedFiles = Get-ChangedFilesSinceTag $targetTag $meaningfulPatterns
+    $hasChanges = $changedFiles.Count -gt 0
       if ($hasChanges) {
         Write-Warning "Functional changes detected!"
         Write-Info "Changed files since ${targetTag}:"

@@ -37,6 +37,10 @@ $ErrorActionPreference = "Stop"
 # Import shared logging module
 . (Join-Path $PSScriptRoot "Import-LoggingModule.ps1")
 
+# Import shared modules
+Import-Module (Join-Path $PSScriptRoot "modules" "Git-Operations.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "modules" "Project-Version.psm1") -Force
+
 # Ensure we're in the repo root
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
@@ -46,40 +50,28 @@ try {
 
     # Get the current version from the project file
     $projectFile = "source\Electrified.TimeSeries\Electrified.TimeSeries.csproj"
-    if (-not (Test-Path $projectFile)) {
-        throw "Project file not found: $projectFile"
-    }
+    Assert-ProjectFile $projectFile
 
-    $projectXml = [xml](Get-Content $projectFile)
-    $versionPrefixNode = $projectXml.Project.PropertyGroup.VersionPrefix
-    if (-not $versionPrefixNode) {
-        throw "VersionPrefix not found in $projectFile"
-    }
-
-    $currentVersion = $versionPrefixNode
-    Write-Success "📦 Current version: $currentVersion"
-
-    # Parse version components
-    if ($currentVersion -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
-        throw "Invalid version format: $currentVersion (expected x.y.z)"
-    }
-    $major = [int]$matches[1]
-    $minor = [int]$matches[2]
-    $patch = [int]$matches[3]
+    $currentVersion = Get-ProjectVersion $projectFile
+    Write-Success "📦 Current version: $currentVersion"    # Parse version components - these are available if needed for custom logic
+    $versionParts = Get-VersionParts $currentVersion
+    # Note: Individual components available as $versionParts.Major, $versionParts.Minor, $versionParts.Patch
 
     # Check if tag already exists
-    $tagName = "v$currentVersion"
-    $existingTag = git tag -l $tagName 2>$null
-    if ($existingTag -and -not $Force) {
+    $tagName = Get-TagName $currentVersion
+    if ((Test-GitTag $tagName) -and (-not $Force)) {
         throw "Tag $tagName already exists. Use -Force to override or bump the version first."
     }
 
     # Get the latest tag to check for changes
-    $latestTag = git describe --tags --abbrev=0 2>$null
+    $latestTag = Get-LastTag
     if ($latestTag) {
-        Write-Host "🏷️  Latest tag: $latestTag" -ForegroundColor Yellow
-          # Check for changes since last tag (exclude version bumps and build artifacts)
-        $changes = git diff --name-only "$latestTag..HEAD" -- . ':!*.csproj' ':!scripts/release.ps1' ':!change-log/' ':!*.md' ':!bin/' ':!obj/' ':!test-output/'
+        Write-Host "🏷️  Latest tag: $latestTag" -ForegroundColor Yellow        # Check for changes since last tag (exclude version bumps and build artifacts)
+        $changes = Get-ChangedFilesSinceTag $latestTag @(
+            "source/**/*.cs",
+            "tests/**/*.cs", 
+            "*.csproj"
+        )
         if (-not $changes -and -not $Force) {
             Write-Warning "⚠️  No code changes detected since ${latestTag}"
             Write-Host "   Only documentation, build artifacts, or version files have changed" -ForegroundColor Gray
@@ -97,11 +89,8 @@ try {
         }
     } else {
         Write-Host "🆕 No previous tags found - this will be the first release" -ForegroundColor Yellow
-    }
-
-    # Calculate next version
-    $nextPatch = $patch + 1
-    $nextVersion = "$major.$minor.$nextPatch"
+    }    # Calculate next version
+    $nextVersion = Step-PatchVersion $currentVersion
     
     Write-Host ""
     Write-Host "📋 Release Plan:" -ForegroundColor Cyan
@@ -138,12 +127,9 @@ try {
     git tag -a $tagName -m "Release $currentVersion"
     
     Write-Host "📤 Pushing tag to trigger release build..." -ForegroundColor Green
-    git push origin $tagName
-
-    # Update version for next release
+    git push origin $tagName    # Update version for next release
     Write-Host "⬆️  Bumping version to $nextVersion..." -ForegroundColor Green
-    $projectXml.Project.PropertyGroup.VersionPrefix = $nextVersion
-    $projectXml.Save((Resolve-Path $projectFile))
+    Set-ProjectVersion $projectFile $nextVersion
 
     # Commit version bump
     git add $projectFile
