@@ -58,6 +58,7 @@ env:
 
 jobs:  # 🔍 Phase 1: Change Detection & Strategy Planning
   change-detection:
+    name: '🔍 Change Detection'
     uses: ./.github/workflows/change-detection-focused.yml
     with:
       source-patterns: |
@@ -67,7 +68,7 @@ jobs:  # 🔍 Phase 1: Change Detection & Strategy Planning
       test-patterns: |
         tests/**/*.cs
         tests/**/*.csproj
-      config-patterns: |
+            config-patterns: |
         *.config
         *.json
         *.yml
@@ -76,8 +77,9 @@ jobs:  # 🔍 Phase 1: Change Detection & Strategy Planning
         .github/workflows/**/*.yml
         .github/workflows/**/*.yaml
       generate-change-summary: true
-      
+
   version-strategy:
+    name: '📋 Version Strategy'
     needs: change-detection
     uses: ./.github/workflows/version-strategy-focused.yml
     with:
