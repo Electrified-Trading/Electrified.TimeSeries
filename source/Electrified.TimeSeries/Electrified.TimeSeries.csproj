@@ -4,18 +4,19 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    
-    <!-- NuGet Package Metadata -->
+      <!-- NuGet Package Metadata -->
     <PackageId>Electrified.TimeSeries</PackageId>
     <Version>1.0.0</Version>
     <Authors>electricessence</Authors>
     <Company>Electrified Trading</Company>
     <Product>Electrified.TimeSeries</Product>
+    <Description>A time series library for financial data processing and analysis.</Description>
     <PackageTags>timeseries;financial;trading;ohlc;bars;data</PackageTags>
     <RepositoryUrl>https://github.com/Electrified-Trading/Electrified.TimeSeries</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageProjectUrl>https://github.com/Electrified-Trading/Electrified.TimeSeries</PackageProjectUrl>
     
     <!-- Symbol and Documentation -->
     <IncludeSymbols>true</IncludeSymbols>
