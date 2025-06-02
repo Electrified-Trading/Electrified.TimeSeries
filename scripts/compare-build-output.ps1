@@ -159,51 +159,64 @@ function Build-TaggedOutput($Tag, $BuildPath) {
         return Build-AndHashOutput $BuildPath "current-as-tagged (testing)"
     }
 
-    Write-ActionInfo "Building output from tag $Tag..."
+    Write-ActionInfo "Building output from tag $Tag using worktree..."
     
-    # Save current state
-    $currentBranch = git branch --show-current 2>$null
-    $hasUncommittedChanges = $null -ne (git status --porcelain 2>$null)
-    
-    # Fix the git stash comment around line 156
-    if ($hasUncommittedChanges) {
-        Write-ActionInfo "Stashing uncommitted changes..."
-        git stash push -m "Auto-stash for build comparison" | Out-Null
-    }
+    # Use clean tag name for worktree path: .git/.wt/v1.0.1
+    $worktreePath = Join-Path (Get-Location) ".git/.wt/$Tag"
+    $originalLocation = Get-Location
     
     try {
-        # Checkout the tag
-        Write-ActionInfo "Checking out tag $Tag..."
-        git checkout $Tag --quiet 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to checkout tag $Tag"
+        # Ensure .git/.wt directory exists
+        $wtBaseDir = Join-Path (Get-Location) ".git/.wt"
+        if (-not (Test-Path $wtBaseDir)) {
+            New-Item -ItemType Directory -Path $wtBaseDir -Force | Out-Null
         }
+
+        # Remove existing worktree if it exists (cleanup from previous runs)
+        if (Test-Path $worktreePath) {
+            Write-ActionInfo "Cleaning up existing worktree for $Tag..."
+            git worktree remove $worktreePath --force 2>$null | Out-Null
+        }
+
+        # Create worktree for the tag
+        Write-ActionInfo "Creating worktree at .git/.wt/$Tag..."
+        git worktree add $worktreePath $Tag --quiet 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to create worktree for tag $Tag. Tag may not exist."
+        }
+
+        if ($Debug) {
+            Write-DebugInfo "Worktree created successfully at: $worktreePath"
+            Write-DebugInfo "Switching to worktree directory for build"
+        }
+
+        # Change to worktree directory and build
+        Push-Location $worktreePath
         
-        # Build and hash the tagged version
+        # Build the tagged version in the worktree
         $taggedResult = Build-AndHashOutput $BuildPath "tagged ($Tag)"
         
-        if($Debug) {
+        if ($Debug) {
+            Write-DebugInfo "Tagged build completed in worktree"
             Write-DebugInfo "taggedResult type: $($taggedResult.GetType().Name)"
             Write-DebugInfo "taggedResult.CombinedHash exists: $($null -ne $taggedResult.CombinedHash)"
-            if ($taggedResult -is [array]) {
-                Write-DebugInfo "It's an array with $($taggedResult.Count) elements"
-                for ($i = 0; $i -lt $taggedResult.Count; $i++) {
-                    Write-DebugInfo "Element $i type: $($taggedResult[$i].GetType().Name)"
-                }
-            }
         }
-        
+
         return $taggedResult
-    }
-    finally {
-        # Restore original state
-        Write-ActionInfo "Restoring original git state..."
-        if ($currentBranch) {
-            git checkout $currentBranch --quiet 2>$null
-        }
         
-        if ($hasUncommittedChanges) {
-            git stash pop --quiet 2>$null
+    } finally {
+        # Always restore location first
+        if ((Get-Location).Path -ne $originalLocation.Path) {
+            Pop-Location
+        }
+
+        # Clean up worktree
+        if (Test-Path $worktreePath) {
+            Write-ActionInfo "Cleaning up worktree..."
+            git worktree remove $worktreePath --force 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-ActionWarning "Failed to remove worktree at $worktreePath - manual cleanup may be needed"
+            }
         }
     }
 }
