@@ -55,31 +55,19 @@ jobs:
           echo "has_changes=true" >> $env:GITHUB_OUTPUT
           exit 0
         }
-        
-        try {
+          try {
           Write-Host "::notice::🔍 Running deterministic build output comparison..."
           Write-Host "::notice::📁 Project: $projectPath"
           
           # Execute the build output comparison script in CI mode
           & $scriptPath -Mode CI -ProjectPath $projectPath -OutputDir "workflow-build-comparison"
-          $exitCode = $LASTEXITCODE
           
-          if ($exitCode -eq 0) {
-            Write-Host "::notice::✅ Build outputs are identical"
-            Write-Host "::notice::⏭️ No functional changes detected - skipping package creation"
-            echo "has_changes=false" >> $env:GITHUB_OUTPUT
-          } elseif ($exitCode -eq 1) {
-            Write-Host "::notice::🔄 Functional changes detected in build output"
-            Write-Host "::notice::📦 Will create new package version"
-            echo "has_changes=true" >> $env:GITHUB_OUTPUT
-          } else {
-            Write-Host "::error::Build comparison failed with exit code: $exitCode"
-            Write-Host "::warning::Assuming changes exist to be safe"
-            echo "has_changes=true" >> $env:GITHUB_OUTPUT
-          }        } catch {
+          # Script now always exits 0 and sets has-changes output directly
+          Write-Host "::notice::✅ Build comparison completed successfully"
+        } catch {
           Write-Host "::error::Error during build comparison: $_"
           Write-Host "::warning::Assuming changes exist to be safe"
-          echo "has_changes=true" >> $env:GITHUB_OUTPUT
+          echo "has-changes=true" >> $env:GITHUB_OUTPUT
         }
       shell: pwsh
 
