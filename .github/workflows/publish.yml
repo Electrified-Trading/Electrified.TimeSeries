@@ -35,20 +35,18 @@ jobs:
       run: dotnet build --configuration Release --no-restore
 
     - name: Test
-      run: dotnet test --configuration Release --no-build --verbosity normal
-
-    # Generate version for preview packages (non-tag pushes)
-    - name: Generate Preview Version
+      run: dotnet test --configuration Release --no-build --verbosity normal    # Generate version suffix for preview packages (non-tag pushes)
+    - name: Generate Preview Version Suffix
       if: github.ref_type != 'tag'
       run: |
-        # Get UTC date in format YYYYMMDD
-        $utcDate = (Get-Date).ToUniversalTime().ToString("yyyyMMdd")
-        # Get short commit SHA
-        $shortSha = "${{ github.sha }}".Substring(0, 7)
-        # Create preview version: base version + preview suffix
-        $previewVersion = "1.0.0-preview.$utcDate.sha$shortSha"
-        echo "PACKAGE_VERSION=$previewVersion" >> $env:GITHUB_ENV
-        echo "Preview version: $previewVersion"
+        # Get branch name and clean it for package versioning
+        $branchName = "${{ github.ref_name }}" -replace '[^a-zA-Z0-9]', ''
+        # Get UTC timestamp in format YYYYMMDDHHmm
+        $utcTimestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddHHmm")
+        # Create version suffix: branch-timestamp
+        $versionSuffix = "$branchName-$utcTimestamp"
+        echo "VERSION_SUFFIX=$versionSuffix" >> $env:GITHUB_ENV
+        echo "Version suffix: $versionSuffix"
       shell: pwsh
 
     # Extract version from tag (tag pushes)
@@ -61,7 +59,21 @@ jobs:
         echo "Release version: $tagVersion"
       shell: pwsh
 
-    - name: Pack NuGet Package
+    # Pack with version suffix for preview builds
+    - name: Pack NuGet Package (Preview)
+      if: github.ref_type != 'tag'
+      run: |
+        dotnet pack ${{ env.PROJECT_PATH }} \
+          --configuration Release \
+          --no-build \
+          --include-symbols \
+          --include-source \
+          --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
+          --version-suffix ${{ env.VERSION_SUFFIX }}
+
+    # Pack with explicit version for release builds
+    - name: Pack NuGet Package (Release)
+      if: github.ref_type == 'tag'
       run: |
         dotnet pack ${{ env.PROJECT_PATH }} \
           --configuration Release \
