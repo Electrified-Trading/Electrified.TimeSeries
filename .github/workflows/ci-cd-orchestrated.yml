@@ -1,0 +1,330 @@
+# 🎯 CI/CD Orchestration Pipeline
+# Ultra-granular workflow orchestration with focused responsibilities
+# Part of the modular CI/CD architecture
+
+name: '🎯 CI/CD Orchestration'
+
+on:
+  push:
+    branches: [ main, develop, 'release/*', 'hotfix/*' ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/workflows/MODULAR-ARCHITECTURE.md'
+      
+  pull_request:
+    branches: [ main, develop ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/workflows/MODULAR-ARCHITECTURE.md'
+      
+  release:
+    types: [ published ]
+    
+  workflow_dispatch:
+    inputs:
+      skip-tests:
+        description: 'Skip test execution'
+        required: false
+        type: boolean
+        default: false
+      skip-coverage:
+        description: 'Skip code coverage collection'
+        required: false
+        type: boolean
+        default: false
+      run-performance-tests:
+        description: 'Run performance tests'
+        required: false
+        type: boolean
+        default: false
+      force-publish:
+        description: 'Force package publishing (bypass change detection)'
+        required: false
+        type: boolean
+        default: false
+      target-environment:
+        description: 'Target environment for deployment'
+        required: false
+        type: choice
+        options: ['preview', 'production']
+        default: 'preview'
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  # 🔍 Phase 1: Change Detection & Strategy Planning
+  change-detection:
+    name: '🔍 Detect Changes'
+    uses: ./.github/workflows/change-detection-focused.yml
+    with:
+      source-patterns: |
+        source/**/*.cs
+        source/**/*.csproj
+        **/*.sln
+      test-patterns: |
+        tests/**/*.cs
+        tests/**/*.csproj
+      config-patterns: |
+        *.config
+        *.json
+        *.yml
+        *.yaml
+      workflow-patterns: |
+        .github/workflows/**/*.yml
+        .github/workflows/**/*.yaml
+      generate-change-summary: true
+      
+  version-strategy:
+    name: '📋 Version Strategy'
+    needs: change-detection
+    uses: ./.github/workflows/version-strategy-focused.yml
+    with:
+      has-source-changes: ${{ needs.change-detection.outputs.has-source-changes == 'true' }}
+      has-test-changes: ${{ needs.change-detection.outputs.has-test-changes == 'true' }}
+      has-config-changes: ${{ needs.change-detection.outputs.has-config-changes == 'true' }}
+      is-release-branch: ${{ contains(github.ref, 'release/') }}
+      is-hotfix-branch: ${{ contains(github.ref, 'hotfix/') }}
+      is-main-branch: ${{ github.ref == 'refs/heads/main' }}
+      is-release-tag: ${{ github.event_name == 'release' }}
+      
+  # 🔨 Phase 2: Build
+  build:
+    name: '🔨 Build'
+    needs: [change-detection, version-strategy]
+    if: needs.change-detection.outputs.has-source-changes == 'true' || github.event.inputs.force-publish == 'true'
+    uses: ./.github/workflows/build-focused.yml
+    with:
+      configuration: ${{ needs.version-strategy.outputs.build-configuration }}
+      upload-artifacts: true
+      enable-optimization: ${{ needs.version-strategy.outputs.build-configuration == 'Release' }}
+      artifact-retention-days: 7
+      
+  # 🧪 Phase 3: Testing
+  test:
+    name: '🧪 Test'
+    needs: [change-detection, version-strategy, build]
+    if: |
+      always() && 
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      github.event.inputs.skip-tests != 'true'
+    uses: ./.github/workflows/test-focused.yml
+    with:
+      run-unit-tests: true
+      run-integration-tests: ${{ needs.change-detection.outputs.has-source-changes == 'true' }}
+      run-performance-tests: ${{ github.event.inputs.run-performance-tests == 'true' }}
+      collect-coverage: ${{ github.event.inputs.skip-coverage != 'true' }}
+      coverage-threshold: 80
+      upload-test-results: true
+      fail-on-coverage: ${{ github.event_name == 'pull_request' }}
+      test-configuration: ${{ needs.version-strategy.outputs.build-configuration }}
+      
+  # 📦 Phase 4: Package Creation
+  package:
+    name: '📦 Package'
+    needs: [change-detection, version-strategy, build, test]
+    if: |
+      always() && 
+      (needs.test.result == 'success' || needs.test.result == 'skipped') &&
+      (needs.change-detection.outputs.should-publish == 'true' || github.event.inputs.force-publish == 'true')
+    uses: ./.github/workflows/package-creation-focused.yml
+    with:
+      package-strategy: ${{ needs.version-strategy.outputs.package-strategy }}
+      include-symbols: true
+      upload-packages: true
+      validate-packages: true
+      package-retention-days: 30
+      
+  # 🚀 Phase 5: Publishing
+  publish:
+    name: '🚀 Publish'
+    needs: [change-detection, version-strategy, build, test, package]
+    if: |
+      always() && 
+      needs.package.result == 'success' &&
+      (needs.change-detection.outputs.should-publish == 'true' || github.event.inputs.force-publish == 'true') &&
+      (github.event_name == 'push' || github.event_name == 'release' || github.event_name == 'workflow_dispatch')
+    uses: ./.github/workflows/package-publishing-focused.yml
+    with:
+      package-strategy: ${{ needs.version-strategy.outputs.package-strategy }}
+      target-feed: ${{ github.event_name == 'release' && 'nuget-org' || 'github-packages' }}
+      dry-run: ${{ github.event_name == 'pull_request' }}
+      cleanup-old-packages: ${{ github.event_name == 'release' }}
+    secrets:
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+  # 📊 Phase 6: Pipeline Summary
+  pipeline-summary:
+    name: '📊 Pipeline Summary'
+    runs-on: ubuntu-latest
+    needs: [change-detection, version-strategy, build, test, package, publish]
+    if: always()
+    
+    steps:
+      - name: '📊 Generate Pipeline Summary'
+        run: |
+          echo "## 🎯 CI/CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Pipeline Context
+          echo "### 📋 Pipeline Context" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run**: #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Change Detection Results
+          echo "### 🔍 Change Detection" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ needs.change-detection.result }}" == "success" ]]; then
+            echo "✅ **Change Detection**: Completed" >> $GITHUB_STEP_SUMMARY
+            echo "- Source Changes: ${{ needs.change-detection.outputs.has-source-changes == 'true' && '✅ Yes' || '❌ No' }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Test Changes: ${{ needs.change-detection.outputs.has-test-changes == 'true' && '✅ Yes' || '❌ No' }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Should Publish: ${{ needs.change-detection.outputs.should-publish == 'true' && '✅ Yes' || '❌ No' }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Change Detection**: Failed or Skipped" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Version Strategy Results
+          echo "### 📋 Version Strategy" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ needs.version-strategy.result }}" == "success" ]]; then
+            echo "✅ **Version Strategy**: ${{ needs.version-strategy.outputs.package-strategy }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Build Configuration: ${{ needs.version-strategy.outputs.build-configuration }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Version Strategy**: Failed or Skipped" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Build Results
+          echo "### 🔨 Build" >> $GITHUB_STEP_SUMMARY
+          case "${{ needs.build.result }}" in
+            "success")
+              echo "✅ **Build**: Successful" >> $GITHUB_STEP_SUMMARY
+              ;;
+            "skipped")
+              echo "⏭️ **Build**: Skipped (No source changes)" >> $GITHUB_STEP_SUMMARY
+              ;;
+            "failure")
+              echo "❌ **Build**: Failed" >> $GITHUB_STEP_SUMMARY
+              ;;
+            *)
+              echo "⚠️ **Build**: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
+              ;;
+          esac
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Test Results
+          echo "### 🧪 Testing" >> $GITHUB_STEP_SUMMARY
+          case "${{ needs.test.result }}" in
+            "success")
+              echo "✅ **Testing**: All tests passed" >> $GITHUB_STEP_SUMMARY
+              if [[ "${{ needs.test.outputs.coverage-percentage }}" != "" ]]; then
+                echo "- Code Coverage: ${{ needs.test.outputs.coverage-percentage }}%" >> $GITHUB_STEP_SUMMARY
+              fi
+              ;;
+            "skipped")
+              echo "⏭️ **Testing**: Skipped" >> $GITHUB_STEP_SUMMARY
+              ;;
+            "failure")
+              echo "❌ **Testing**: Failed" >> $GITHUB_STEP_SUMMARY
+              ;;
+            *)
+              echo "⚠️ **Testing**: ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
+              ;;
+          esac
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Package Results
+          echo "### 📦 Packaging" >> $GITHUB_STEP_SUMMARY
+          case "${{ needs.package.result }}" in
+            "success")
+              echo "✅ **Packaging**: Package created successfully" >> $GITHUB_STEP_SUMMARY
+              ;;
+            "skipped")
+              echo "⏭️ **Packaging**: Skipped (No publishing needed)" >> $GITHUB_STEP_SUMMARY
+              ;;
+            "failure")
+              echo "❌ **Packaging**: Failed" >> $GITHUB_STEP_SUMMARY
+              ;;
+            *)
+              echo "⚠️ **Packaging**: ${{ needs.package.result }}" >> $GITHUB_STEP_SUMMARY
+              ;;
+          esac
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Publishing Results
+          echo "### 🚀 Publishing" >> $GITHUB_STEP_SUMMARY
+          case "${{ needs.publish.result }}" in
+            "success")
+              echo "✅ **Publishing**: Package published successfully" >> $GITHUB_STEP_SUMMARY
+              ;;
+            "skipped")
+              echo "⏭️ **Publishing**: Skipped" >> $GITHUB_STEP_SUMMARY
+              ;;
+            "failure")
+              echo "❌ **Publishing**: Failed" >> $GITHUB_STEP_SUMMARY
+              ;;
+            *)
+              echo "⚠️ **Publishing**: ${{ needs.publish.result }}" >> $GITHUB_STEP_SUMMARY
+              ;;
+          esac
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Overall Pipeline Status
+          echo "### 🎯 Overall Status" >> $GITHUB_STEP_SUMMARY
+          
+          CRITICAL_FAILURES=0
+          
+          # Check for critical failures
+          if [[ "${{ needs.build.result }}" == "failure" ]]; then
+            CRITICAL_FAILURES=$((CRITICAL_FAILURES + 1))
+          fi
+          
+          if [[ "${{ needs.test.result }}" == "failure" ]]; then
+            CRITICAL_FAILURES=$((CRITICAL_FAILURES + 1))
+          fi
+          
+          if [[ "${{ needs.package.result }}" == "failure" ]]; then
+            CRITICAL_FAILURES=$((CRITICAL_FAILURES + 1))
+          fi
+          
+          if [[ "${{ needs.publish.result }}" == "failure" ]]; then
+            CRITICAL_FAILURES=$((CRITICAL_FAILURES + 1))
+          fi
+          
+          if [[ $CRITICAL_FAILURES -eq 0 ]]; then
+            echo "🎉 **Pipeline Status**: SUCCESS" >> $GITHUB_STEP_SUMMARY
+            echo "All phases completed successfully or were appropriately skipped." >> $GITHUB_STEP_SUMMARY
+          elif [[ $CRITICAL_FAILURES -eq 1 ]]; then
+            echo "⚠️ **Pipeline Status**: PARTIAL SUCCESS" >> $GITHUB_STEP_SUMMARY
+            echo "One phase failed, but others completed successfully." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Pipeline Status**: FAILURE" >> $GITHUB_STEP_SUMMARY
+            echo "Multiple critical phases failed. Review the pipeline logs." >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Next Steps
+          echo "### 🔄 Next Steps" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "- Review test results and coverage reports" >> $GITHUB_STEP_SUMMARY
+            echo "- Address any failing tests or coverage issues" >> $GITHUB_STEP_SUMMARY
+            echo "- Merge PR to trigger deployment pipeline" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.publish.result }}" == "success" ]]; then
+            echo "- Package has been published successfully" >> $GITHUB_STEP_SUMMARY
+            echo "- Update consuming projects to use new version" >> $GITHUB_STEP_SUMMARY
+            echo "- Monitor for any deployment issues" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.change-detection.outputs.should-publish }}" == "false" ]]; then
+            echo "- No publishing required (no significant changes detected)" >> $GITHUB_STEP_SUMMARY
+            echo "- Continue development or merge changes as needed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Review failed phases and address issues" >> $GITHUB_STEP_SUMMARY
+            echo "- Re-run pipeline after fixes are applied" >> $GITHUB_STEP_SUMMARY
+          fi
