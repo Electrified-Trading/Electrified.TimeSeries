@@ -47,7 +47,27 @@ public static partial class ModelExtensions
 			lastTimestamp = bar.Timestamp;
 		}
 		
-		return true;	}
+		return true;
+	}
+	/// <summary>
+	/// Gets the time span between the first and last bars in a sequence.
+	/// </summary>
+	/// <typeparam name="TData">The type of data contained in the bars</typeparam>
+	/// <param name="source">The source enumerable of bars</param>
+	/// <returns>The time span of the sequence, or null if the sequence is empty</returns>
+	public static TimeSpan? GetTimeSpan<TData>(this IEnumerable<Bar<TData>> source)
+	{
+		Bar<TData>? first = null;
+		Bar<TData>? last = null;
+		
+		foreach (var bar in source)
+		{
+			first ??= bar;
+			last = bar;
+		}
+		
+		return first is not null && last is not null ? last.Timestamp - first.Timestamp : null;
+	}
 
 	/// <summary>
 	/// Ensures bars are in chronological order, starting from DateTime.MinValue.
