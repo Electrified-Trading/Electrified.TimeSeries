@@ -30,9 +30,14 @@ dotnet build
 
 This repository uses GitHub Actions for automated building and publishing:
 
-- **Preview Packages**: Published on every push to any branch with version format `1.0.0-preview.YYYYMMDD.shaXXXXXXX`
+- **Preview Packages**: Published on every push to any branch with version format `1.0.0-branch-YYYYMMDDHHmm`
 - **Release Packages**: Published when tags are pushed (e.g., `v1.0.0` → `1.0.0`)
 - **Package Registry**: GitHub Packages at `https://nuget.pkg.github.com/Electrified-Trading/index.json`
+
+Examples:
+- Push to `main` → `1.0.0-main-202506011845`
+- Push to `feature/new-api` → `1.0.0-featurenewapi-202506011900` 
+- Tag `v1.2.0` → `1.2.0`
 
 ## Contributing
 
