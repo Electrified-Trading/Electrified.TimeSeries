@@ -86,6 +86,7 @@ function Build-AndHashOutput($BuildPath, $Description = "build") {
     if (Test-Path $BuildPath) {
         Remove-Item $BuildPath -Recurse -Force
     }
+
     New-Item -ItemType Directory -Path $BuildPath | Out-Null
     
     # Build the project with deterministic settings
@@ -95,6 +96,7 @@ function Build-AndHashOutput($BuildPath, $Description = "build") {
     if ($LASTEXITCODE -ne 0) {
         throw "Build failed for $Description"
     }
+
     Write-Host " Done" -ForegroundColor Green
     
     # Find build output directory
@@ -117,13 +119,16 @@ function Build-AndHashOutput($BuildPath, $Description = "build") {
     }
     
     Write-ActionInfo "Hashing $($filesToHash.Count) files for comparison:"
-      # Create content hash manifest
+
+    # Create content hash manifest with NORMALIZED relative paths
     $contentHashes = @{}
     foreach ($file in $filesToHash) {
-        $relativePath = $file.FullName.Substring($binDebugPath.Length + 1)
+        # Use only the filename for the key to ensure consistency between builds
+        # This normalizes paths between current working directory and worktree
+        $normalizedKey = $file.Name
         $fileHash = Get-FileHash $file.FullName -Algorithm SHA256
-        $contentHashes[$relativePath] = $fileHash.Hash
-        Write-Host "    $relativePath : $($fileHash.Hash.Substring(0,8))..." -ForegroundColor Gray
+        $contentHashes[$normalizedKey] = $fileHash.Hash
+        Write-Host "    $normalizedKey : $($fileHash.Hash.Substring(0,8))..." -ForegroundColor Gray
     }
     
     # Create combined hash from all file hashes (sorted for determinism)
@@ -211,13 +216,13 @@ function Build-TaggedOutput($Tag, $BuildPath) {
         }
 
         # Clean up worktree
-        if (Test-Path $worktreePath) {
-            Write-ActionInfo "Cleaning up worktree..."
-            git worktree remove $worktreePath --force 2>$null | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                Write-ActionWarning "Failed to remove worktree at $worktreePath - manual cleanup may be needed"
-            }
-        }
+        # if (Test-Path $worktreePath) {
+        #     Write-ActionInfo "Cleaning up worktree..."
+        #     git worktree remove $worktreePath --force 2>$null | Out-Null
+        #     if ($LASTEXITCODE -ne 0) {
+        #         Write-ActionWarning "Failed to remove worktree at $worktreePath - manual cleanup may be needed"
+        #     }
+        # }
     }
 }
 
