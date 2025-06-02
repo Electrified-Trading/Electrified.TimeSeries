@@ -1,0 +1,259 @@
+# 📋 Version Strategy Focused Workflow
+# Context-aware versioning strategy determination
+# Part of the modular CI/CD architecture
+
+name: '📋 Version Strategy Focus'
+
+on:
+  workflow_call:
+    inputs:
+      has-source-changes:
+        description: 'Whether source code changes were detected'
+        required: false
+        type: boolean
+        default: false
+      has-test-changes:
+        description: 'Whether test changes were detected'
+        required: false
+        type: boolean
+        default: false
+      has-config-changes:
+        description: 'Whether config changes were detected'
+        required: false
+        type: boolean
+        default: false
+      is-release-branch:
+        description: 'Whether this is a release branch'
+        required: false
+        type: boolean
+        default: false
+      is-hotfix-branch:
+        description: 'Whether this is a hotfix branch'
+        required: false
+        type: boolean
+        default: false
+      is-main-branch:
+        description: 'Whether this is the main branch'
+        required: false
+        type: boolean
+        default: false
+      is-release-tag:
+        description: 'Whether this is a release tag push'
+        required: false
+        type: boolean
+        default: false
+      default-strategy:
+        description: 'Default strategy if no context matches'
+        required: false
+        type: string
+        default: 'preview'
+        
+    outputs:
+      package-strategy:
+        description: 'Determined package strategy'
+        value: ${{ jobs.version-strategy.outputs.package-strategy }}
+      build-configuration:
+        description: 'Recommended build configuration'
+        value: ${{ jobs.version-strategy.outputs.build-configuration }}
+      should-increment:
+        description: 'Whether version should be incremented'
+        value: ${{ jobs.version-strategy.outputs.should-increment }}
+        
+  workflow_dispatch:
+    inputs:
+      has-source-changes:
+        description: 'Whether source code changes were detected'
+        required: false
+        type: boolean
+        default: false
+      has-test-changes:
+        description: 'Whether test changes were detected'
+        required: false
+        type: boolean
+        default: false
+      has-config-changes:
+        description: 'Whether config changes were detected'
+        required: false
+        type: boolean
+        default: false
+      is-release-branch:
+        description: 'Whether this is a release branch'
+        required: false
+        type: boolean
+        default: false
+      is-hotfix-branch:
+        description: 'Whether this is a hotfix branch'
+        required: false
+        type: boolean
+        default: false
+      is-main-branch:
+        description: 'Whether this is the main branch'
+        required: false
+        type: boolean
+        default: false
+      is-release-tag:
+        description: 'Whether this is a release tag push'
+        required: false
+        type: boolean
+        default: false
+      default-strategy:
+        description: 'Default strategy if no context matches'
+        required: false
+        type: string
+        default: 'preview'
+
+jobs:
+  version-strategy:
+    name: '📋 Determine Strategy'
+    runs-on: ubuntu-latest
+    
+    outputs:
+      package-strategy: ${{ steps.strategy-logic.outputs.package-strategy }}
+      build-configuration: ${{ steps.strategy-logic.outputs.build-configuration }}
+      should-increment: ${{ steps.strategy-logic.outputs.should-increment }}
+      
+    steps:
+      - name: '📋 Strategy Logic'
+        id: strategy-logic
+        run: |
+          echo "::group::📋 Analyzing context for version strategy"
+          
+          # Input variables
+          HAS_SOURCE="${{ inputs.has-source-changes }}"
+          HAS_TEST="${{ inputs.has-test-changes }}"
+          HAS_CONFIG="${{ inputs.has-config-changes }}"
+          IS_RELEASE="${{ inputs.is-release-branch }}"
+          IS_HOTFIX="${{ inputs.is-hotfix-branch }}"
+          IS_MAIN="${{ inputs.is-main-branch }}"
+          IS_TAG="${{ inputs.is-release-tag }}"
+          DEFAULT_STRATEGY="${{ inputs.default-strategy }}"
+          
+          # Context analysis
+          echo "📊 Context Analysis:"
+          echo "  - Source Changes: $HAS_SOURCE"
+          echo "  - Test Changes: $HAS_TEST"
+          echo "  - Config Changes: $HAS_CONFIG"
+          echo "  - Release Branch: $IS_RELEASE"
+          echo "  - Hotfix Branch: $IS_HOTFIX"
+          echo "  - Main Branch: $IS_MAIN"
+          echo "  - Release Tag: $IS_TAG"
+          echo "  - Event: ${{ github.event_name }}"
+          echo "  - Ref: ${{ github.ref }}"
+          
+          # Strategy determination logic
+          PACKAGE_STRATEGY=""
+          BUILD_CONFIGURATION=""
+          SHOULD_INCREMENT="false"
+          
+          if [[ "$IS_TAG" == "true" ]]; then
+            echo "🏷️ Release tag detected"
+            PACKAGE_STRATEGY="release"
+            BUILD_CONFIGURATION="Release"
+            SHOULD_INCREMENT="false"  # Tag already has version
+          elif [[ "$IS_HOTFIX" == "true" ]]; then
+            echo "🔥 Hotfix branch detected"
+            PACKAGE_STRATEGY="release"
+            BUILD_CONFIGURATION="Release"
+            SHOULD_INCREMENT="true"
+          elif [[ "$IS_RELEASE" == "true" ]]; then
+            echo "🚀 Release branch detected"
+            PACKAGE_STRATEGY="release"
+            BUILD_CONFIGURATION="Release"
+            SHOULD_INCREMENT="true"
+          elif [[ "$IS_MAIN" == "true" ]]; then
+            if [[ "$HAS_SOURCE" == "true" ]]; then
+              echo "🎯 Main branch with source changes"
+              PACKAGE_STRATEGY="release"
+              BUILD_CONFIGURATION="Release"
+              SHOULD_INCREMENT="true"
+            else
+              echo "🎯 Main branch without source changes"
+              PACKAGE_STRATEGY="preview"
+              BUILD_CONFIGURATION="Release"
+              SHOULD_INCREMENT="false"
+            fi
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "📝 Pull request detected"
+            PACKAGE_STRATEGY="debug-release"
+            BUILD_CONFIGURATION="Debug"
+            SHOULD_INCREMENT="false"
+          else
+            echo "🔧 Development context"
+            if [[ "$HAS_SOURCE" == "true" ]] || [[ "$HAS_CONFIG" == "true" ]]; then
+              PACKAGE_STRATEGY="preview"
+              BUILD_CONFIGURATION="Release"
+              SHOULD_INCREMENT="true"
+            else
+              PACKAGE_STRATEGY="$DEFAULT_STRATEGY"
+              BUILD_CONFIGURATION="Debug"
+              SHOULD_INCREMENT="false"
+            fi
+          fi
+          
+          # Output results
+          echo "package-strategy=$PACKAGE_STRATEGY" >> $GITHUB_OUTPUT
+          echo "build-configuration=$BUILD_CONFIGURATION" >> $GITHUB_OUTPUT
+          echo "should-increment=$SHOULD_INCREMENT" >> $GITHUB_OUTPUT
+          
+          echo ""
+          echo "🎯 Strategy Determination Results:"
+          echo "  📦 Package Strategy: $PACKAGE_STRATEGY"
+          echo "  🔨 Build Configuration: $BUILD_CONFIGURATION"
+          echo "  🔢 Should Increment: $SHOULD_INCREMENT"
+          
+          echo "::endgroup::"
+          
+      - name: '📊 Strategy Summary'
+        run: |
+          echo "## 📋 Version Strategy Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Context**: ${{ github.event_name }} on \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Run**: #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 📊 Input Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "| Input | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔨 Source Changes | ${{ inputs.has-source-changes && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧪 Test Changes | ${{ inputs.has-test-changes && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ⚙️ Config Changes | ${{ inputs.has-config-changes && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🚀 Release Branch | ${{ inputs.is-release-branch && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔥 Hotfix Branch | ${{ inputs.is-hotfix-branch && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎯 Main Branch | ${{ inputs.is-main-branch && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏷️ Release Tag | ${{ inputs.is-release-tag && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 🎯 Strategy Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Output | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 📦 Package Strategy | \`${{ steps.strategy-logic.outputs.package-strategy }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔨 Build Configuration | \`${{ steps.strategy-logic.outputs.build-configuration }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔢 Should Increment | ${{ steps.strategy-logic.outputs.should-increment == 'true' && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Strategy explanation
+          case "${{ steps.strategy-logic.outputs.package-strategy }}" in
+            "release")
+              echo "### 🚀 Release Strategy" >> $GITHUB_STEP_SUMMARY
+              echo "This strategy produces **production-ready packages** suitable for public consumption." >> $GITHUB_STEP_SUMMARY
+              echo "- Optimized Release build" >> $GITHUB_STEP_SUMMARY
+              echo "- Full version increment (if applicable)" >> $GITHUB_STEP_SUMMARY
+              echo "- Production-grade packaging" >> $GITHUB_STEP_SUMMARY
+              ;;
+            "preview")
+              echo "### 🔍 Preview Strategy" >> $GITHUB_STEP_SUMMARY
+              echo "This strategy produces **preview packages** for testing and validation." >> $GITHUB_STEP_SUMMARY
+              echo "- Release build with preview versioning" >> $GITHUB_STEP_SUMMARY
+              echo "- Incremental version updates" >> $GITHUB_STEP_SUMMARY
+              echo "- Internal testing focus" >> $GITHUB_STEP_SUMMARY
+              ;;
+            "debug-release")
+              echo "### 🔧 Debug-Release Strategy" >> $GITHUB_STEP_SUMMARY
+              echo "This strategy produces **debug packages** for development and troubleshooting." >> $GITHUB_STEP_SUMMARY
+              echo "- Debug build with symbols" >> $GITHUB_STEP_SUMMARY
+              echo "- No version increment" >> $GITHUB_STEP_SUMMARY
+              echo "- Development focus" >> $GITHUB_STEP_SUMMARY
+              ;;
+          esac
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next Steps**: Use these outputs to configure subsequent pipeline phases." >> $GITHUB_STEP_SUMMARY

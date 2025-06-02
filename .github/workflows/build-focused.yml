@@ -1,0 +1,244 @@
+# 🔨 Build Focused Workflow
+# Pure build operations with configuration support
+# Part of the modular CI/CD architecture
+
+name: '🔨 Build Focus'
+
+on:
+  workflow_call:
+    inputs:
+      configuration:
+        description: 'Build configuration (Debug/Release)'
+        required: false
+        type: string
+        default: 'Release'
+      upload-artifacts:
+        description: 'Upload build artifacts'
+        required: false
+        type: boolean
+        default: false
+      enable-optimization:
+        description: 'Enable build optimizations'
+        required: false
+        type: boolean
+        default: true
+      artifact-retention-days:
+        description: 'Days to retain artifacts'
+        required: false
+        type: number
+        default: 7
+      verbosity:
+        description: 'Build verbosity level'
+        required: false
+        type: string
+        default: 'minimal'
+        
+    outputs:
+      build-artifacts:
+        description: 'Path to build artifacts'
+        value: ${{ jobs.build.outputs.build-artifacts }}
+      build-configuration:
+        description: 'Build configuration used'
+        value: ${{ jobs.build.outputs.build-configuration }}
+      build-success:
+        description: 'Whether build was successful'
+        value: ${{ jobs.build.outputs.build-success }}
+        
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: 'Build configuration (Debug/Release)'
+        required: false
+        type: choice
+        options: ['Debug', 'Release']
+        default: 'Release'
+      upload-artifacts:
+        description: 'Upload build artifacts'
+        required: false
+        type: boolean
+        default: false
+      enable-optimization:
+        description: 'Enable build optimizations'
+        required: false
+        type: boolean
+        default: true
+      artifact-retention-days:
+        description: 'Days to retain artifacts'
+        required: false
+        type: number
+        default: 7
+      verbosity:
+        description: 'Build verbosity level'
+        required: false
+        type: choice
+        options: ['quiet', 'minimal', 'normal', 'detailed', 'diagnostic']
+        default: 'minimal'
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  build:
+    name: '🔨 Execute Build'
+    runs-on: ubuntu-latest
+    
+    outputs:
+      build-artifacts: ${{ steps.build-info.outputs.build-artifacts }}
+      build-configuration: ${{ steps.build-info.outputs.build-configuration }}
+      build-success: ${{ steps.build-execution.outputs.build-success }}
+      
+    steps:
+      - name: '📥 Checkout Repository'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: '⚙️ Setup .NET'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+          
+      - name: '🧹 Clean Solution'
+        run: |
+          echo "::group::🧹 Cleaning previous build artifacts"
+          dotnet clean --verbosity ${{ inputs.verbosity }}
+          echo "::endgroup::"
+          
+      - name: '📦 Restore Dependencies'
+        run: |
+          echo "::group::📦 Restoring NuGet packages"
+          dotnet restore --verbosity ${{ inputs.verbosity }}
+          echo "::endgroup::"
+          
+      - name: '🔨 Build Solution'
+        id: build-execution
+        run: |
+          echo "::group::🔨 Building solution"
+          
+          BUILD_SUCCESS="false"
+          
+          # Build with specified configuration
+          if dotnet build \
+            --configuration ${{ inputs.configuration }} \
+            --no-restore \
+            --verbosity ${{ inputs.verbosity }} \
+            ${{ inputs.enable-optimization == true && '--optimize' || '' }}; then
+            
+            BUILD_SUCCESS="true"
+            echo "✅ Build completed successfully"
+          else
+            echo "❌ Build failed"
+            exit 1
+          fi
+          
+          echo "build-success=$BUILD_SUCCESS" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+          
+      - name: '📋 Build Information'
+        id: build-info
+        run: |
+          echo "::group::📋 Collecting build information"
+          
+          # Set build configuration
+          echo "build-configuration=${{ inputs.configuration }}" >> $GITHUB_OUTPUT
+          
+          # Determine artifact paths
+          ARTIFACT_PATH="."
+          if [[ "${{ inputs.upload-artifacts }}" == "true" ]]; then
+            ARTIFACT_PATH="build-artifacts-${{ inputs.configuration }}-${{ github.run_number }}"
+          fi
+          echo "build-artifacts=$ARTIFACT_PATH" >> $GITHUB_OUTPUT
+          
+          # Display build summary
+          echo "🔨 Build Summary:"
+          echo "  - Configuration: ${{ inputs.configuration }}"
+          echo "  - Optimization: ${{ inputs.enable-optimization }}"
+          echo "  - Verbosity: ${{ inputs.verbosity }}"
+          echo "  - Artifacts: $ARTIFACT_PATH"
+          echo "  - Success: ${{ steps.build-execution.outputs.build-success }}"
+          
+          echo "::endgroup::"
+          
+      - name: '📤 Upload Build Artifacts'
+        if: inputs.upload-artifacts && steps.build-execution.outputs.build-success == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build-info.outputs.build-artifacts }}
+          path: |
+            source/**/bin/${{ inputs.configuration }}/**/*
+            source/**/obj/${{ inputs.configuration }}/**/Electrified.*.nuspec
+            !**/*.pdb
+            !**/*.tmp
+          retention-days: ${{ inputs.artifact-retention-days }}
+          if-no-files-found: warn
+          
+      - name: '🔍 Build Verification'
+        if: steps.build-execution.outputs.build-success == 'true'
+        run: |
+          echo "::group::🔍 Verifying build outputs"
+          
+          # Verify build outputs exist
+          BUILD_DIR="source/Electrified.TimeSeries/bin/${{ inputs.configuration }}"
+          
+          if [[ -d "$BUILD_DIR" ]]; then
+            echo "✅ Build directory exists: $BUILD_DIR"
+            
+            # List build outputs
+            echo "📁 Build outputs:"
+            find "$BUILD_DIR" -type f -name "*.dll" -o -name "*.exe" | head -10 | while read file; do
+              echo "  - $(basename "$file")"
+            done
+            
+            # Check for main assembly
+            if find "$BUILD_DIR" -name "Electrified.TimeSeries.dll" | grep -q .; then
+              echo "✅ Main assembly found"
+            else
+              echo "⚠️ Main assembly not found"
+            fi
+          else
+            echo "❌ Build directory not found: $BUILD_DIR"
+            exit 1
+          fi
+          
+          echo "::endgroup::"
+          
+      - name: '📊 Build Summary'
+        if: always()
+        run: |
+          echo "## 🔨 Build Execution Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Repository**: ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Run**: #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 🔧 Build Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "| Setting | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Configuration | \`${{ inputs.configuration }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Optimization | ${{ inputs.enable-optimization && '✅ Enabled' || '❌ Disabled' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Verbosity | \`${{ inputs.verbosity }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Artifacts | ${{ inputs.upload-artifacts && '✅ Uploaded' || '❌ Not uploaded' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Retention | ${{ inputs.artifact-retention-days }} days |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### 📊 Build Results" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ steps.build-execution.outputs.build-success }}" == "true" ]]; then
+            echo "✅ **Build Status**: SUCCESS" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The solution compiled successfully with the ${{ inputs.configuration }} configuration." >> $GITHUB_STEP_SUMMARY
+            
+            if [[ "${{ inputs.upload-artifacts }}" == "true" ]]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "📦 **Artifacts**: Available as \`${{ steps.build-info.outputs.build-artifacts }}\`" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "❌ **Build Status**: FAILURE" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The build failed. Check the build logs for detailed error information." >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next Steps**: ${{ steps.build-execution.outputs.build-success == 'true' && 'Proceed to testing phase' || 'Review build errors and fix compilation issues' }}" >> $GITHUB_STEP_SUMMARY
