@@ -24,25 +24,12 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Import shared logging module
+. (Join-Path $PSScriptRoot "Import-LoggingModule.ps1")
+
 # Configuration
 $ProjectPath = "source/Electrified.TimeSeries/Electrified.TimeSeries.csproj"
 $TestOutputPath = "test-output"
-
-function Write-Info($Message) {
-    Write-Host "📝 $Message" -ForegroundColor Cyan
-}
-
-function Write-Success($Message) {
-    Write-Host "✅ $Message" -ForegroundColor Green
-}
-
-function Write-Warning($Message) {
-    Write-Host "⚠️  $Message" -ForegroundColor Yellow
-}
-
-function Write-Error($Message) {
-    Write-Host "❌ $Message" -ForegroundColor Red
-}
 
 function Get-ProjectVersion {
     $content = Get-Content $ProjectPath -Raw
@@ -89,9 +76,8 @@ function Build-CurrentPackage($Version, $OutputPath) {
     if ($LASTEXITCODE -ne 0) {
         throw "Pack failed"
     }
-    
-    # Return the main package file (not symbols)
-    $packageFiles = Get-ChildItem $OutputPath -Filter "*.nupkg" | Where-Object { -not $_.Name.Contains(".symbols.") }
+      # Return the main package file (not symbols)
+    $packageFiles = @(Get-ChildItem $OutputPath -Filter "*.nupkg" | Where-Object { -not $_.Name.Contains(".symbols.") })
     if ($packageFiles.Count -eq 0) {
         throw "No package file found in $OutputPath"
     }
@@ -104,8 +90,7 @@ function Build-TaggedPackage($Tag, $OutputPath) {
     
     $tempDir = Join-Path $env:TEMP "electrified-tag-build-$(Get-Random)"
     
-    try {
-        # Create temp directory and clone the tag
+    try {        # Create temp directory and clone the tag
         New-Item -ItemType Directory -Path $tempDir | Out-Null
         Push-Location $tempDir
         
@@ -135,9 +120,8 @@ function Build-TaggedPackage($Tag, $OutputPath) {
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to pack tagged version"
         }
-        
-        # Return the main package file (not symbols)
-        $packageFiles = Get-ChildItem $OutputPath -Filter "*.nupkg" | Where-Object { -not $_.Name.Contains(".symbols.") }
+          # Return the main package file (not symbols)
+        $packageFiles = @(Get-ChildItem $OutputPath -Filter "*.nupkg" | Where-Object { -not $_.Name.Contains(".symbols.") })
         if ($packageFiles.Count -eq 0) {
             throw "No tagged package file found in $OutputPath"
         }

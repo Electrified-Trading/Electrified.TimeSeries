@@ -58,99 +58,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Enable UTF-8 output for GitHub Actions
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+# Import shared logging module
+. (Join-Path $PSScriptRoot "Import-LoggingModule.ps1")
 
-# Determine if we're in CI mode for structured output
+# Determine if we're in CI mode
 $IsCI = $Mode -eq "CI" -or $env:GITHUB_ACTIONS -eq "true"
-
-# GitHub Actions/CI specific logging functions
-function Write-ActionInfo($Message) {
-    if ($IsCI) {
-        Write-Host "::notice::$Message"
-    } else {
-        Write-Host "[INFO] $Message" -ForegroundColor Cyan
-    }
-}
-
-function Write-ActionSuccess($Message) {
-    if ($IsCI) {
-        Write-Host "::notice::✅ $Message"
-    } else {
-        Write-Host "[SUCCESS] $Message" -ForegroundColor Green
-    }
-}
-
-function Write-ActionWarning($Message) {
-    if ($IsCI) {
-        Write-Host "::warning::$Message"
-    } else {
-        Write-Host "[WARNING] $Message" -ForegroundColor Yellow
-    }
-}
-
-function Write-ActionError($Message) {
-    if ($IsCI) {
-        Write-Host "::error::$Message"
-    } else {
-        Write-Host "[ERROR] $Message" -ForegroundColor Red
-    }
-}
-
-function Write-ActionResult($Message, $Color = "White") {
-    if ($IsCI) {
-        Write-Host "::notice::🎯 RESULT: $Message"
-        # Set output for GitHub Actions workflow consumption
-        Write-Host "::set-output name=comparison_result::$Message"
-        
-        # Add to job summary for better visibility
-        $summaryFile = $env:GITHUB_STEP_SUMMARY
-        if ($summaryFile) {
-            $summary = @"
-## 🔍 Build Output Comparison Result
-
-**Result:** $Message
-
-**Details:**
-- Mode: $Mode
-- Project: $ProjectPath
-- Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
-
-"@
-            Add-Content -Path $summaryFile -Value $summary
-        }
-    } else {
-        Write-Host ""
-        Write-Host "RESULT: $Message" -ForegroundColor $Color -BackgroundColor Black
-        Write-Host ""
-    }
-}
-
-function Write-DebugInfo($Message) {
-    if ($Debug) {
-        if ($IsCI) {
-            Write-Host "::debug::$Message"
-        } else {
-            Write-Host "[DEBUG] $Message" -ForegroundColor Magenta
-        }
-    }
-}
-
-function Write-ActionGroup($Title, $ScriptBlock) {
-    if ($IsCI) {
-        Write-Host "::group::$Title"
-        try {
-            & $ScriptBlock
-        } finally {
-            Write-Host "::endgroup::"
-        }
-    } else {
-        Write-Host ""
-        Write-Host "=== $Title ===" -ForegroundColor Cyan -BackgroundColor DarkBlue
-        & $ScriptBlock
-        Write-Host ""
-    }
-}
 
 function Write-DetailedProgress($Activity, $Status = "In Progress") {
     if (-not $IsCI) {
@@ -159,7 +71,7 @@ function Write-DetailedProgress($Activity, $Status = "In Progress") {
             Write-Host " Done" -ForegroundColor Green
         }
     } else {
-        #Write-ActionInfo "$Activity"
+        #Write-Info "$Activity"
     }
 }
 
@@ -176,7 +88,7 @@ function Get-LastTag {
 }
 
 function Build-AndHashOutput($BuildPath, $Description = "build") {
-    Write-ActionInfo "Building and hashing $Description output..."
+    Write-Info "Building and hashing $Description output..."
     
     # Clean and create build directory
     if (Test-Path $BuildPath) {
@@ -212,7 +124,7 @@ function Build-AndHashOutput($BuildPath, $Description = "build") {
     if ($filesToHash.Count -eq 0) {
         throw "No files found to hash in build output directory"
     }
-      Write-ActionInfo "Hashing $($filesToHash.Count) files for comparison:"
+      Write-Info "Hashing $($filesToHash.Count) files for comparison:"
 
     # Create content hash manifest with NORMALIZED relative paths
     $contentHashes = @{}
@@ -243,8 +155,8 @@ function Build-AndHashOutput($BuildPath, $Description = "build") {
         Timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"
     }
     $manifest | ConvertTo-Json -Depth 3 | Set-Content $manifestPath
-      Write-ActionInfo "Combined content hash: $($combinedHashString.Substring(0,16))..."
-    Write-DebugInfo "Manifest saved: $(Split-Path $manifestPath -Leaf)"
+      Write-Info "Combined content hash: $($combinedHashString.Substring(0,16))..."
+    Write-Debug "Manifest saved: $(Split-Path $manifestPath -Leaf)"
     
     return @{
         ManifestPath = $manifestPath
@@ -256,11 +168,11 @@ function Build-AndHashOutput($BuildPath, $Description = "build") {
 
 function Build-TaggedOutput($Tag, $BuildPath) {
     if ($SkipGitOperations) {
-        Write-ActionWarning "TESTING MODE: Skipping git operations, using current code as 'tagged' version"
+        Write-Warning "TESTING MODE: Skipping git operations, using current code as 'tagged' version"
         return Build-AndHashOutput $BuildPath "current-as-tagged (testing)"
     }
 
-    Write-ActionInfo "Building output from tag $Tag using worktree..."
+    Write-Info "Building output from tag $Tag using worktree..."
     
     # Use clean tag name for worktree path: .git/.wt/v1.0.1
     $worktreePath = Join-Path (Get-Location) ".git/.wt/$Tag"
@@ -275,20 +187,20 @@ function Build-TaggedOutput($Tag, $BuildPath) {
 
         # Remove existing worktree if it exists (cleanup from previous runs)
         if (Test-Path $worktreePath) {
-            Write-ActionInfo "Cleaning up existing worktree for $Tag..."
+            Write-Info "Cleaning up existing worktree for $Tag..."
             git worktree remove $worktreePath --force 2>$null | Out-Null
         }
 
         # Create worktree for the tag
-        Write-ActionInfo "Creating worktree at .git/.wt/$Tag..."
+        Write-Info "Creating worktree at .git/.wt/$Tag..."
         git worktree add $worktreePath $Tag --quiet 2>$null
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to create worktree for tag $Tag. Tag may not exist."
         }
 
         if ($Debug) {
-            Write-DebugInfo "Worktree created successfully at: $worktreePath"
-            Write-DebugInfo "Switching to worktree directory for build"
+            Write-Debug "Worktree created successfully at: $worktreePath"
+            Write-Debug "Switching to worktree directory for build"
         }
 
         # Change to worktree directory and build
@@ -298,9 +210,9 @@ function Build-TaggedOutput($Tag, $BuildPath) {
         $taggedResult = Build-AndHashOutput $BuildPath "tagged ($Tag)"
         
         if ($Debug) {
-            Write-DebugInfo "Tagged build completed in worktree"
-            Write-DebugInfo "taggedResult type: $($taggedResult.GetType().Name)"
-            Write-DebugInfo "taggedResult.CombinedHash exists: $($null -ne $taggedResult.CombinedHash)"
+            Write-Debug "Tagged build completed in worktree"
+            Write-Debug "taggedResult type: $($taggedResult.GetType().Name)"
+            Write-Debug "taggedResult.CombinedHash exists: $($null -ne $taggedResult.CombinedHash)"
         }
 
         return $taggedResult
@@ -313,17 +225,17 @@ function Build-TaggedOutput($Tag, $BuildPath) {
 
         # Clean up worktree
         if (Test-Path $worktreePath) {
-            Write-ActionInfo "Cleaning up worktree..."
+            Write-Info "Cleaning up worktree..."
             git worktree remove $worktreePath --force 2>$null | Out-Null
             if ($LASTEXITCODE -ne 0) {
-                Write-ActionWarning "Failed to remove worktree at $worktreePath - manual cleanup may be needed"
+                Write-Warning "Failed to remove worktree at $worktreePath - manual cleanup may be needed"
             }
         }
     }
 }
 
 function Compare-ContentHashes($CurrentResult, $TaggedResult) {
-    Write-ActionInfo "Comparing build content hashes..."
+    Write-Info "Comparing build content hashes..."
       $currentHash = $CurrentResult.CombinedHash
     $taggedHash = $TaggedResult.CombinedHash
     
@@ -331,8 +243,8 @@ function Compare-ContentHashes($CurrentResult, $TaggedResult) {
         Write-Host "  Current:  $($currentHash.Substring(0,16))... ($($CurrentResult.FileCount) files)" -ForegroundColor Gray
         Write-Host "  Tagged:   $($taggedHash.Substring(0,16))... ($($TaggedResult.FileCount) files)" -ForegroundColor Gray
     } else {
-        Write-ActionInfo "Current hash: $($currentHash.Substring(0,16))... ($($CurrentResult.FileCount) files)"
-        Write-ActionInfo "Tagged hash: $($taggedHash.Substring(0,16))... ($($TaggedResult.FileCount) files)"
+        Write-Info "Current hash: $($currentHash.Substring(0,16))... ($($CurrentResult.FileCount) files)"
+        Write-Info "Tagged hash: $($taggedHash.Substring(0,16))... ($($TaggedResult.FileCount) files)"
     }
     
     # Compare individual file hashes to identify what changed
@@ -356,12 +268,12 @@ function Compare-ContentHashes($CurrentResult, $TaggedResult) {
         }
     }
       if ($changedFiles.Count -gt 0) {
-        Write-ActionInfo "File changes detected:"
+        Write-Info "File changes detected:"
         foreach ($change in $changedFiles) {
             if (-not $IsCI) {
                 Write-Host "    $change" -ForegroundColor Yellow
             } else {
-                Write-ActionInfo "  $change"
+                Write-Info "  $change"
             }
         }
     }
@@ -379,11 +291,11 @@ function Compare-ContentHashes($CurrentResult, $TaggedResult) {
 # Main execution with error handling and structured output
 function Invoke-MainExecution {
     try {
-        Write-ActionInfo "Starting functional change detection via build output comparison..."
-        Write-ActionInfo "Mode: $Mode | Project: $ProjectPath"
+        Write-Info "Starting functional change detection via build output comparison..."
+        Write-Info "Mode: $Mode | Project: $ProjectPath"
           # Ensure we're in a git repository
         if (-not (Test-Path ".git")) {
-            Write-ActionError "Not in a git repository root"
+            Write-Error "Not in a git repository root"
             
             if ($IsCI) {
                 return 2  # Configuration error in CI mode
@@ -395,8 +307,8 @@ function Invoke-MainExecution {
         # Get target tag
         $targetTag = if ($TagName) { $TagName } else { Get-LastTag }
           if (-not $targetTag) {
-            Write-ActionWarning "No previous tags found - this appears to be the first release"
-            Write-ActionResult "PUBLISH_NEEDED (First Release)" "Green"
+            Write-Warning "No previous tags found - this appears to be the first release"
+            Write-Result "PUBLISH_NEEDED (First Release)"
             
             if ($IsCI) {
                 return 1  # Signal changes detected (first release) in CI mode
@@ -405,17 +317,17 @@ function Invoke-MainExecution {
             }
         }
         
-        Write-ActionInfo "Comparing against tag: $targetTag"
+        Write-Info "Comparing against tag: $targetTag"
           # Phase 1: Environment & Git Setup
-        Write-ActionGroup "🔧 Environment & Git Setup" {
-            Write-ActionSuccess "Environment setup complete"
+        Write-Group "🔧 Environment & Git Setup" {
+            Write-Success "Environment setup complete"
         }
         
         # Phase 2: Build Operations
-        Write-ActionGroup "🔨 Build Operations" {
-            Write-ActionInfo "Building current version..."
-            Write-ActionInfo "Building tagged version ($targetTag)..."
-            Write-ActionSuccess "Build operations initiated"
+        Write-Group "🔨 Build Operations" {
+            Write-Info "Building current version..."
+            Write-Info "Building tagged version ($targetTag)..."
+            Write-Success "Build operations initiated"
         }
         
         # Build current output
@@ -425,33 +337,33 @@ function Invoke-MainExecution {
         $taggedResult = Build-TaggedOutput $targetTag (Join-Path $OutputDir "tagged")
         
         if($Debug) {
-            Write-DebugInfo "After Build-TaggedOutput call:"
-            Write-DebugInfo "taggedResult type: $($taggedResult.GetType().Name)"
-            Write-DebugInfo "taggedResult is array: $($taggedResult -is [array])"
+            Write-Debug "After Build-TaggedOutput call:"
+            Write-Debug "taggedResult type: $($taggedResult.GetType().Name)"
+            Write-Debug "taggedResult is array: $($taggedResult -is [array])"
             if ($taggedResult -is [array]) {
-                Write-DebugInfo "Array has $($taggedResult.Count) elements"
-                Write-DebugInfo "First element type: $($taggedResult[0].GetType().Name)"
-                Write-DebugInfo "First element has CombinedHash: $($null -ne $taggedResult[0].CombinedHash)"
+                Write-Debug "Array has $($taggedResult.Count) elements"
+                Write-Debug "First element type: $($taggedResult[0].GetType().Name)"
+                Write-Debug "First element has CombinedHash: $($null -ne $taggedResult[0].CombinedHash)"
             } else {
-                Write-DebugInfo "Has CombinedHash: $($null -ne $taggedResult.CombinedHash)"
+                Write-Debug "Has CombinedHash: $($null -ne $taggedResult.CombinedHash)"
             }
         }
 
-        Write-ActionSuccess "Built and analyzed both versions:"
+        Write-Success "Built and analyzed both versions:"
         if (-not $IsCI) {
             Write-Host "  Current: $($currentResult.FileCount) files" -ForegroundColor Gray
             Write-Host "  Tagged:  $($taggedResult.FileCount) files" -ForegroundColor Gray
         }
         
         # Phase 3: Hash Comparison & Decision
-        Write-ActionGroup "🔍 Hash Comparison & Decision" {
+        Write-Group "🔍 Hash Comparison & Decision" {
             # Compare hashes
             $comparison = Compare-ContentHashes $currentResult $taggedResult
               if ($comparison.Identical) {
-                Write-ActionInfo "Build outputs are SAME"
-                Write-ActionInfo "No functional changes detected between current code and $targetTag"
-                Write-ActionInfo "CI/CD will skip package publishing to avoid duplicate versions"
-                Write-ActionResult "SKIP_PUBLISH (No Changes)" "Green"
+                Write-Info "Build outputs are SAME"
+                Write-Info "No functional changes detected between current code and $targetTag"
+                Write-Info "CI/CD will skip package publishing to avoid duplicate versions"
+                Write-Result "SKIP_PUBLISH (No Changes)"
                 
                 if ($IsCI) {
                     return 0  # Signal no changes in CI mode
@@ -459,17 +371,17 @@ function Invoke-MainExecution {
                     exit 0  # Signal no changes in Local mode
                 }
             } else {
-                Write-ActionInfo "Build outputs are DIFFERENT"
-                Write-ActionInfo "Functional changes detected between current code and $targetTag"
+                Write-Info "Build outputs are DIFFERENT"
+                Write-Info "Functional changes detected between current code and $targetTag"
                 
                 if ($comparison.CurrentFileCount -ne $comparison.TaggedFileCount) {
                     $fileDiff = $comparison.CurrentFileCount - $comparison.TaggedFileCount
                     $fileDirection = if ($fileDiff -gt 0) { "more" } else { "fewer" }
-                    Write-ActionInfo "File count difference: $([Math]::Abs($fileDiff)) $fileDirection files"
+                    Write-Info "File count difference: $([Math]::Abs($fileDiff)) $fileDirection files"
                 }
                 
-                Write-ActionInfo "CI/CD will create and publish new package version"
-                Write-ActionResult "PUBLISH_NEEDED (Changes Detected)" "Yellow"
+                Write-Info "CI/CD will create and publish new package version"
+                Write-Result "PUBLISH_NEEDED (Changes Detected)"
                 
                 if ($IsCI) {
                     return 1  # Signal changes detected in CI mode
@@ -480,12 +392,12 @@ function Invoke-MainExecution {
         }
           } catch {
         if($Debug) { 
-            Write-ActionError "Debug mode: re-throwing exception for investigation"
+            Write-Error "Debug mode: re-throwing exception for investigation"
             throw $_ 
         }
-        Write-ActionError "Build comparison failed: $_"
-        Write-ActionWarning "Failing safe: assuming changes exist to prevent missed releases"
-        Write-ActionResult "PUBLISH_NEEDED (Safety Fallback)" "Red"
+        Write-Error "Build comparison failed: $_"
+        Write-Warning "Failing safe: assuming changes exist to prevent missed releases"
+        Write-Result "PUBLISH_NEEDED (Safety Fallback)"
         
         if ($IsCI) {
             return 1  # Fail safe: assume changes exist in CI mode
@@ -501,11 +413,9 @@ if ($IsCI) {
     $result = Invoke-MainExecution
       # Set GitHub Actions outputs based on result
     if ($result -eq 0) {
-        Write-ActionInfo "Setting GitHub Actions output: has_changes=false"
-        Write-Output "has_changes=false" >> $env:GITHUB_OUTPUT
+        Set-ActionOutput "has_changes" "false"
     } else {
-        Write-ActionInfo "Setting GitHub Actions output: has_changes=true"  
-        Write-Output "has_changes=true" >> $env:GITHUB_OUTPUT
+        Set-ActionOutput "has_changes" "true"
     }
     
     # Always exit 0 in CI mode to let workflow continue

@@ -34,15 +34,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Set UTF-8 encoding for proper Unicode character display
-$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+# Import shared logging module
+. (Join-Path $PSScriptRoot "Import-LoggingModule.ps1")
 
 # Ensure we're in the repo root
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
 
 try {
-    Write-Host "🔍 Analyzing repository for release..." -ForegroundColor Cyan
+    Write-Info "🔍 Analyzing repository for release..."
 
     # Get the current version from the project file
     $projectFile = "source\Electrified.TimeSeries\Electrified.TimeSeries.csproj"
@@ -57,7 +57,7 @@ try {
     }
 
     $currentVersion = $versionPrefixNode
-    Write-Host "📦 Current version: $currentVersion" -ForegroundColor Green
+    Write-Success "📦 Current version: $currentVersion"
 
     # Parse version components
     if ($currentVersion -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
@@ -81,7 +81,7 @@ try {
           # Check for changes since last tag (exclude version bumps and build artifacts)
         $changes = git diff --name-only "$latestTag..HEAD" -- . ':!*.csproj' ':!scripts/release.ps1' ':!change-log/' ':!*.md' ':!bin/' ':!obj/' ':!test-output/'
         if (-not $changes -and -not $Force) {
-            Write-Host "⚠️  No code changes detected since ${latestTag}" -ForegroundColor Yellow
+            Write-Warning "⚠️  No code changes detected since ${latestTag}"
             Write-Host "   Only documentation, build artifacts, or version files have changed" -ForegroundColor Gray
             Write-Host "   Use -Force to create a release anyway" -ForegroundColor Gray
             Write-Host ""
@@ -92,7 +92,7 @@ try {
             return
         }
           if ($changes) {
-            Write-Host "📝 Changes since ${latestTag}:" -ForegroundColor Green
+            Write-Success "📝 Changes since ${latestTag}:"
             $changes | ForEach-Object { Write-Host "   • $_" -ForegroundColor Gray }
         }
     } else {

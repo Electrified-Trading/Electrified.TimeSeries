@@ -25,24 +25,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# GitHub Actions specific logging functions
-function Write-ActionInfo($Message) {
-    Write-Host "🔍 $Message" -ForegroundColor Cyan
-}
-
-function Write-ActionSuccess($Message) {
-    Write-Host "✅ $Message" -ForegroundColor Green
-}
-
-function Write-ActionWarning($Message) {
-    Write-Host "⚠️ $Message" -ForegroundColor Yellow
-}
-
-function Write-ActionResult($Message, $Color = "White") {
-    Write-Host ""
-    Write-Host "🎯 RESULT: $Message" -ForegroundColor $Color -BackgroundColor Black
-    Write-Host ""
-}
+# Import shared logging module
+. (Join-Path $PSScriptRoot "Import-LoggingModule.ps1")
 
 function Get-LastTag {
     try {
@@ -58,24 +42,23 @@ function Get-LastTag {
 
 # Main execution
 try {
-    Write-ActionInfo "Starting git-based functional change detection..."
+    Write-Info "Starting git-based functional change detection..."
     
     # Ensure we're in a git repository
     if (-not (Test-Path ".git")) {
-        Write-ActionError "Not in a git repository root"
+        Write-Error "Not in a git repository root"
         exit 2
     }
     
     # Get target tag
     $targetTag = if ($TagName) { $TagName } else { Get-LastTag }
-    
-    if (-not $targetTag) {
-        Write-ActionWarning "No previous tags found - this appears to be the first release"
-        Write-ActionResult "PUBLISH_NEEDED (First Release)" "Green"
+      if (-not $targetTag) {
+        Write-Warning "No previous tags found - this appears to be the first release"
+        Write-Result "PUBLISH_NEEDED (First Release)"
         exit 1  # Signal changes detected (first release)
     }
     
-    Write-ActionInfo "Comparing against tag: $targetTag"
+    Write-Info "Comparing against tag: $targetTag"
     
     # Define patterns for meaningful files (source code that affects functionality)
     $meaningfulPatterns = @(
@@ -84,9 +67,8 @@ try {
         "tests/**/*.cs",
         "tests/**/*.csproj"
     )
-    
-    # Check for changes in meaningful files since the tag
-    Write-ActionInfo "Checking for functional code changes..."
+      # Check for changes in meaningful files since the tag
+    Write-Info "Checking for functional code changes..."
     
     $hasChanges = $false
     $changedFiles = @()
@@ -100,27 +82,26 @@ try {
             $hasChanges = $true
         }
     }
-    
-    if ($hasChanges) {
-        Write-ActionWarning "Functional changes detected!"
-        Write-ActionInfo "Changed files since $targetTag:"
+      if ($hasChanges) {
+        Write-Warning "Functional changes detected!"
+        Write-Info "Changed files since ${targetTag}:"
         foreach ($file in $changedFiles) {
             Write-Host "  📝 $file" -ForegroundColor Gray
         }
-        Write-ActionInfo "📦 CI/CD will create and publish new package version"
-        Write-ActionResult "PUBLISH_NEEDED (Changes Detected)" "Yellow"
+        Write-Info "📦 CI/CD will create and publish new package version"
+        Write-Result "PUBLISH_NEEDED (Changes Detected)"
         exit 1  # Signal changes detected
     } else {
-        Write-ActionSuccess "No functional changes detected!"
-        Write-ActionInfo "✅ Only non-functional files changed (docs, scripts, etc.)"
-        Write-ActionInfo "🚀 CI/CD will skip package publishing to avoid duplicate versions"
-        Write-ActionResult "SKIP_PUBLISH (No Changes)" "Green"
+        Write-Success "No functional changes detected!"
+        Write-Info "✅ Only non-functional files changed (docs, scripts, etc.)"
+        Write-Info "🚀 CI/CD will skip package publishing to avoid duplicate versions"
+        Write-Result "SKIP_PUBLISH (No Changes)"
         exit 0  # Signal no changes
     }
     
 } catch {
-    Write-ActionError "Git change detection failed: $_"
-    Write-ActionWarning "🛡️ Failing safe: assuming changes exist to prevent missed releases"
-    Write-ActionResult "PUBLISH_NEEDED (Safety Fallback)" "Red"
+    Write-Error "Git change detection failed: $_"
+    Write-Warning "🛡️ Failing safe: assuming changes exist to prevent missed releases"
+    Write-Result "PUBLISH_NEEDED (Safety Fallback)"
     exit 1  # Fail safe: assume changes exist
 }
