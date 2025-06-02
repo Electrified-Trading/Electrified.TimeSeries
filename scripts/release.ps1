@@ -34,6 +34,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Set UTF-8 encoding for proper Unicode character display
+$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 # Ensure we're in the repo root
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot

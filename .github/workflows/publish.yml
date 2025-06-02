@@ -32,17 +32,15 @@ jobs:
       run: dotnet restore
 
     - name: Build Debug
-      run: dotnet build --configuration Debug --no-restore
-
-    - name: Build Release
+      run: dotnet build --configuration Debug --no-restore    - name: Build Release
       if: github.ref_type == 'tag'
       run: dotnet build --configuration Release --no-restore
 
     - name: Test
       run: dotnet test --configuration Debug --no-build --verbosity normal
 
-    # Check for meaningful changes (only for non-tag pushes)
-    - name: Check for Code Changes
+    # Check if compiled artifacts differ from last tag (only for non-tag pushes)
+    - name: Check for Artifact Changes
       if: github.ref_type != 'tag'
       id: changes
       run: |
@@ -57,17 +55,58 @@ jobs:
         
         echo "Latest tag: $latestTag"
         
-        # Check for changes in source code (exclude version bumps, docs, build artifacts)
-        $changes = git diff --name-only "$latestTag..HEAD" -- . ':!*.csproj' ':!scripts/' ':!*.md' ':!change-log/' ':!bin/' ':!obj/' ':!test-output/' ':!.github/'
+        # Calculate hash of current build artifacts (the actual compiled DLL)
+        $dllPath = "source/Electrified.TimeSeries/bin/Debug/net9.0/Electrified.TimeSeries.dll"
         
-        if ($changes) {
-          echo "Found meaningful changes since $latestTag:"
-          $changes | ForEach-Object { echo "  - $_" }
+        if (-not (Test-Path $dllPath)) {
+          echo "❌ Could not find compiled DLL at $dllPath"
+          exit 1
+        }
+        
+        $currentHash = Get-FileHash $dllPath -Algorithm SHA256
+        echo "🔍 Current build hash: $($currentHash.Hash)"
+        
+        # Build the tagged version in a temp directory for comparison
+        $tempDir = New-Item -ItemType Directory -Path "temp-tag-build" -Force
+        echo "🏗️ Building tagged version $latestTag for comparison..."
+        
+        Push-Location $tempDir
+        try {
+          # Clone just the tagged version
+          git clone --depth 1 --branch $latestTag https://github.com/Electrified-Trading/Electrified.TimeSeries.git . 2>$null
+          
+          # Restore and build the tagged version
+          dotnet restore --verbosity quiet
+          dotnet build source/Electrified.TimeSeries/Electrified.TimeSeries.csproj --configuration Debug --verbosity quiet
+          
+          $taggedDllPath = "source/Electrified.TimeSeries/bin/Debug/net9.0/Electrified.TimeSeries.dll"
+          
+          if (Test-Path $taggedDllPath) {
+            $taggedHash = Get-FileHash $taggedDllPath -Algorithm SHA256
+            echo "🏷️ Tagged version hash: $($taggedHash.Hash)"
+            
+            # Compare the actual compiled artifacts
+            if ($currentHash.Hash -eq $taggedHash.Hash) {
+              echo "✅ Compiled artifacts are identical to $latestTag"
+              echo "⏭️ Skipping package creation - no functional changes detected"
+              echo "has_changes=false" >> $env:GITHUB_OUTPUT
+            } else {
+              echo "🔄 Compiled artifacts differ from $latestTag"
+              echo "📦 Will create new package version"
+              echo "has_changes=true" >> $env:GITHUB_OUTPUT
+            }
+          } else {
+            echo "⚠️ Could not build tagged version for comparison"
+            echo "📦 Assuming changes exist to be safe"
+            echo "has_changes=true" >> $env:GITHUB_OUTPUT
+          }
+        } catch {
+          echo "⚠️ Error during tagged version comparison: $_"
+          echo "📦 Assuming changes exist to be safe"
           echo "has_changes=true" >> $env:GITHUB_OUTPUT
-        } else {
-          echo "No meaningful code changes detected since $latestTag"
-          echo "Skipping package publication to avoid duplicate releases"
-          echo "has_changes=false" >> $env:GITHUB_OUTPUT
+        } finally {
+          Pop-Location
+          Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
         }
       shell: pwsh
 
