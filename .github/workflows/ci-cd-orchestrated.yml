@@ -56,10 +56,8 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
 
-jobs:
-  # 🔍 Phase 1: Change Detection & Strategy Planning
+jobs:  # 🔍 Phase 1: Change Detection & Strategy Planning
   change-detection:
-    name: '🔍 Detect Changes'
     uses: ./.github/workflows/change-detection-focused.yml
     with:
       source-patterns: |
@@ -80,7 +78,6 @@ jobs:
       generate-change-summary: true
       
   version-strategy:
-    name: '📋 Version Strategy'
     needs: change-detection
     uses: ./.github/workflows/version-strategy-focused.yml
     with:
@@ -91,10 +88,8 @@ jobs:
       is-hotfix-branch: ${{ contains(github.ref, 'hotfix/') }}
       is-main-branch: ${{ github.ref == 'refs/heads/main' }}
       is-release-tag: ${{ github.event_name == 'release' }}
-      
-  # 🔨 Phase 2: Build
+        # 🔨 Phase 2: Build
   build:
-    name: '🔨 Build'
     needs: [change-detection, version-strategy]
     if: needs.change-detection.outputs.has-source-changes == 'true' || github.event.inputs.force-publish == 'true'
     uses: ./.github/workflows/build-focused.yml
@@ -103,10 +98,8 @@ jobs:
       upload-artifacts: true
       enable-optimization: ${{ needs.version-strategy.outputs.build-configuration == 'Release' }}
       artifact-retention-days: 7
-      
-  # 🧪 Phase 3: Testing
+        # 🧪 Phase 3: Testing
   test:
-    name: '🧪 Test'
     needs: [change-detection, version-strategy, build]
     if: |
       always() && 
@@ -122,10 +115,8 @@ jobs:
       upload-test-results: true
       fail-on-coverage: ${{ github.event_name == 'pull_request' }}
       test-configuration: ${{ needs.version-strategy.outputs.build-configuration }}
-      
-  # 📦 Phase 4: Package Creation
+        # 📦 Phase 4: Package Creation
   package:
-    name: '📦 Package'
     needs: [change-detection, version-strategy, build, test]
     if: |
       always() && 
@@ -138,10 +129,8 @@ jobs:
       upload-packages: true
       validate-packages: true
       package-retention-days: 30
-      
-  # 🚀 Phase 5: Publishing
+        # 🚀 Phase 5: Publishing
   publish:
-    name: '🚀 Publish'
     needs: [change-detection, version-strategy, build, test, package]
     if: |
       always() && 
