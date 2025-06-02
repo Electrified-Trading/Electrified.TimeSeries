@@ -28,7 +28,8 @@ param(
     [string]$ProjectPath = "source/Electrified.TimeSeries/Electrified.TimeSeries.csproj",
     [string]$TagName = "",
     [string]$OutputDir = "workflow-comparison",
-    [switch]$Debug = $false
+    [switch]$Debug = $false,
+    [switch]$SkipGitOperations = $false  # <- Add this for testing
 )
 
 Set-StrictMode -Version Latest
@@ -153,6 +154,11 @@ function Build-AndHashOutput($BuildPath, $Description = "build") {
 }
 
 function Build-TaggedOutput($Tag, $BuildPath) {
+    if ($SkipGitOperations) {
+        Write-ActionWarning "TESTING MODE: Skipping git operations, using current code as 'tagged' version"
+        return Build-AndHashOutput $BuildPath "current-as-tagged (testing)"
+    }
+
     Write-ActionInfo "Building output from tag $Tag..."
     
     # Save current state
