@@ -255,7 +255,8 @@ jobs:
         github.ref_type != 'tag' && 
         github.event_name == 'push' && 
         (steps.build-previous.outputs.previous-build-failed == 'true' || 
-         steps.compare-builds.outputs.has-changes == 'true')      uses: actions/upload-artifact@v4
+         steps.compare-builds.outputs.has-changes == 'true')
+      uses: actions/upload-artifact@v4
       with:
         name: preview-packages-${{ github.run_number }}
         path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg
