@@ -384,15 +384,17 @@ function Invoke-MainExecution {
 if ($IsCI) {
     # In CI mode, capture return value and set outputs for GitHub Actions
     $result = Invoke-MainExecution
-      # Set GitHub Actions outputs based on result
+    
+    # Set GitHub Actions outputs based on result
     if ($result -eq 0) {
         Set-ActionOutput "has_changes" "false"
     } else {
         Set-ActionOutput "has_changes" "true"
     }
     
-    # Always exit 0 in CI mode to let workflow continue
-    exit 0
+    # Exit with the actual result code so workflow can process it correctly
+    # 0 = no changes, 1 = changes detected, 2 = error
+    exit $result
 } else {
     # In Local mode, let function handle exit directly
     Invoke-MainExecution
