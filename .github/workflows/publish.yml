@@ -125,47 +125,49 @@ jobs:
         fi
         
         # Cleanup worktree
-        git worktree remove ../prev-build --force 2>/dev/null || true
-
-    # Step F: Early exit if no changes (for branches only)
-    - name: Skip Publishing
-      if: |
-        github.ref_type != 'tag' && 
-        github.event_name == 'push' && 
-        steps.build-previous.outputs.previous-build-failed == 'false' &&
-        steps.compare-builds.outputs.has-changes == 'false'
+        git worktree remove ../prev-build --force 2>/dev/null || true    # Step E: Publishing Decision - consolidate all publishing logic
+    - name: Publishing Decision
+      id: publish-decision
+      if: github.event_name == 'push'
       run: |
-        echo "## ⏭️ Publishing Skipped" >> $GITHUB_STEP_SUMMARY
-        echo "**Reason:** No functional changes detected since ${{ steps.build-previous.outputs.previous-ref }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Status:** ✅ Build and tests passed, no publishing needed" >> $GITHUB_STEP_SUMMARY
-        echo "⏭️ No changes detected - workflow complete"
-
-    # Determine publishing strategy (Tags always publish, branches only if changes or previous build failed)
-    - name: Publishing Strategy
-      id: publishing-strategy
-      if: |
-        github.event_name == 'push' && (
-          github.ref_type == 'tag' ||
-          (github.ref_type != 'tag' && (
-            steps.build-previous.outputs.previous-build-failed == 'true' ||
-            steps.compare-builds.outputs.has-changes == 'true'
-          ))
-        )
-      run: |
+        # Determine if we should publish
+        shouldPublish="false"
+        strategy=""
+        reason=""
+        
         if [ "${{ github.ref_type }}" = "tag" ]; then
-          echo "strategy=tag-release" >> $GITHUB_OUTPUT
-          echo "📦 Tag Release: Publishing stable packages"
+          shouldPublish="true"
+          strategy="tag-release"
+          reason="Tag release"
           
           # Extract version from tag
           tagVersion="${{ github.ref_name }}"
           packageVersion="${tagVersion#v}"
           echo "package-version=$packageVersion" >> $GITHUB_OUTPUT
           echo "🏷️ Version: $packageVersion"
-        else
-          echo "strategy=preview-branch" >> $GITHUB_OUTPUT
-          echo "📦 Branch Preview: Publishing preview package"
           
-          # Generate preview version suffix
+        elif [ "${{ steps.build-previous.outputs.previous-build-failed }}" = "true" ]; then
+          shouldPublish="true"
+          strategy="preview-branch"
+          reason="Previous build failed - assuming changes"
+          
+        elif [ "${{ steps.compare-builds.outputs.has-changes }}" = "true" ]; then
+          shouldPublish="true"
+          strategy="preview-branch"
+          reason="Changes detected"
+          
+        else
+          shouldPublish="false"
+          reason="No functional changes detected since ${{ steps.build-previous.outputs.previous-ref }}"
+        fi
+        
+        # Set outputs
+        echo "should-publish=$shouldPublish" >> $GITHUB_OUTPUT
+        echo "strategy=$strategy" >> $GITHUB_OUTPUT
+        echo "reason=$reason" >> $GITHUB_OUTPUT
+        
+        # Generate preview version suffix if needed
+        if [ "$strategy" = "preview-branch" ]; then
           branchName="${{ github.ref_name }}"
           cleanBranch=$(echo "$branchName" | sed 's/[^a-zA-Z0-9]//g')
           utcTimestamp=$(date -u +"%Y%m%d%H%M")
@@ -173,20 +175,29 @@ jobs:
           echo "version-suffix=$versionSuffix" >> $GITHUB_OUTPUT
           echo "🔖 Suffix: $versionSuffix"
         fi
-
-    # Step G: Build Release (only for tags, reusing existing Debug build for branches)
+        
+        # Log decision
+        if [ "$shouldPublish" = "true" ]; then
+          echo "📦 Publishing: $reason"
+          echo "📋 Strategy: $strategy"
+        else
+          echo "⏭️ Skipping: $reason"
+          echo "## ⏭️ Publishing Skipped" >> $GITHUB_STEP_SUMMARY
+          echo "**Reason:** $reason" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ✅ Build and tests passed, no publishing needed" >> $GITHUB_STEP_SUMMARY
+        fi    # Step F: Build Release (only for tags, reusing existing Debug build for branches)
     - name: Build Release
-      if: steps.publishing-strategy.outputs.strategy == 'tag-release'
+      if: steps.publish-decision.outputs.strategy == 'tag-release'
       run: |
         echo "🔨 Building Release configuration..."
         dotnet build --configuration Release --no-restore
 
     - name: Pack
-      if: steps.publishing-strategy.outputs.strategy != ''
+      if: steps.publish-decision.outputs.should-publish == 'true'
       run: |
         mkdir -p ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
         
-        if [ "${{ steps.publishing-strategy.outputs.strategy }}" = "tag-release" ]; then
+        if [ "${{ steps.publish-decision.outputs.strategy }}" = "tag-release" ]; then
           echo "📦 Packing Release packages..."
           # Release package
           dotnet pack ${{ env.PROJECT_PATH }} \
@@ -195,7 +206,7 @@ jobs:
             --include-symbols \
             --include-source \
             --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
-            -p:PackageVersion=${{ steps.publishing-strategy.outputs.package-version }}
+            -p:PackageVersion=${{ steps.publish-decision.outputs.package-version }}
           
           # Debug package for tags
           dotnet pack ${{ env.PROJECT_PATH }} \
@@ -204,7 +215,7 @@ jobs:
             --include-symbols \
             --include-source \
             --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
-            -p:PackageVersion=${{ steps.publishing-strategy.outputs.package-version }}-debug
+            -p:PackageVersion=${{ steps.publish-decision.outputs.package-version }}-debug
         else
           echo "📦 Packing Preview package..."
           # Preview package (Debug only)
@@ -214,11 +225,11 @@ jobs:
             --include-symbols \
             --include-source \
             --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
-            --version-suffix ${{ steps.publishing-strategy.outputs.version-suffix }}
+            --version-suffix ${{ steps.publish-decision.outputs.version-suffix }}
         fi
 
     - name: Publish
-      if: steps.publishing-strategy.outputs.strategy != ''
+      if: steps.publish-decision.outputs.should-publish == 'true'
       run: |
         echo "🚀 Publishing to GitHub Packages..."
         dotnet nuget push "${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg" \
@@ -227,14 +238,12 @@ jobs:
           --skip-duplicate
 
     - name: Upload Artifacts
-      if: steps.publishing-strategy.outputs.strategy != ''
+      if: steps.publish-decision.outputs.should-publish == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: packages-${{ github.run_number }}
         path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg
-        retention-days: 30
-
-    # Step H: Summary and Cleanup
+        retention-days: 30    # Step G: Summary and Cleanup
     - name: Summary
       if: always()
       run: |
@@ -246,9 +255,9 @@ jobs:
         
         if [ "${{ github.event_name }}" = "pull_request" ]; then
           echo "| Publishing | ⏭️ Skipped (PR) |" >> $GITHUB_STEP_SUMMARY
-        elif [ "${{ steps.publishing-strategy.outputs.strategy }}" = "" ]; then
+        elif [ "${{ steps.publish-decision.outputs.should-publish }}" != "true" ]; then
           echo "| Publishing | ⏭️ Skipped (No Changes) |" >> $GITHUB_STEP_SUMMARY
         else
           echo "| Publishing | ✅ Published |" >> $GITHUB_STEP_SUMMARY
-          echo "| Strategy | ${{ steps.publishing-strategy.outputs.strategy }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Strategy | ${{ steps.publish-decision.outputs.strategy }} |" >> $GITHUB_STEP_SUMMARY
         fi
