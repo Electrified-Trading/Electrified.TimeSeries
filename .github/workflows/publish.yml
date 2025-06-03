@@ -1,0 +1,227 @@
+name: Package Publishing
+
+on:
+  push:
+    branches: [ "main", "develop", "feature/*", "hotfix/*" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: '9.0.x'
+  PROJECT_PATH: 'source/Electrified.TimeSeries/Electrified.TimeSeries.csproj'
+  PACKAGE_OUTPUT_DIRECTORY: ${{ github.workspace }}/output
+  NUGET_SOURCE_URL: 'https://nuget.pkg.github.com/Electrified-Trading/index.json'
+
+jobs:
+  # Always run build and test for all scenarios
+  build-and-test:
+    uses: ./.github/workflows/build-test.yml
+    with:
+      configuration: 'Debug'
+      run-tests: true
+      dotnet-version: '9.0.x'
+
+  # For tag pushes: Always build Release too and publish immediately
+  tag-release-build:
+    if: github.ref_type == 'tag'
+    needs: build-and-test
+    uses: ./.github/workflows/build-test.yml
+    with:
+      configuration: 'Release'
+      run-tests: false  # Already tested in Debug
+      dotnet-version: '9.0.x'
+
+  # For branch pushes: Run smart change detection
+  change-detection:
+    if: github.ref_type != 'tag' && github.event_name == 'push'
+    needs: build-and-test
+    uses: ./.github/workflows/change-detection.yml
+    with:
+      project-path: 'source/Electrified.TimeSeries/Electrified.TimeSeries.csproj'
+      comparison-script: 'scripts/compare-build-output.ps1'
+      dotnet-version: '9.0.x'
+
+  # Package creation and publishing
+  package-and-publish:
+    runs-on: ubuntu-latest
+    needs: [build-and-test]
+    # Publish if:
+    # 1. It's a tag push (always publish tags), OR
+    # 2. It's a branch push with detected changes, OR  
+    # 3. It's a branch push but change detection failed (missing needs means it was skipped)
+    if: |
+      github.event_name == 'push' && (
+        github.ref_type == 'tag' ||
+        (github.ref_type != 'tag' && (needs.change-detection.result == 'skipped' || needs.change-detection.outputs.has-changes == 'true'))
+      )
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore Dependencies
+      run: dotnet restore
+
+    - name: Determine Publishing Strategy
+      id: publishing-strategy
+      run: |
+        if [ "${{ github.ref_type }}" = "tag" ]; then
+          echo "strategy=tag-release" >> $GITHUB_OUTPUT
+          echo "📦 Tag Release Strategy: Publishing stable release package"
+          
+          # Extract version from tag (remove 'v' prefix)
+          tagVersion="${{ github.ref_name }}"
+          packageVersion="${tagVersion#v}"
+          echo "package-version=$packageVersion" >> $GITHUB_OUTPUT
+          echo "🏷️ Package version: $packageVersion"
+        else
+          echo "strategy=preview-branch" >> $GITHUB_OUTPUT
+          echo "📦 Preview Strategy: Publishing preview package with version suffix"
+          
+          # Generate preview version suffix
+          branchName="${{ github.ref_name }}"
+          cleanBranch=$(echo "$branchName" | sed 's/[^a-zA-Z0-9]//g')
+          utcTimestamp=$(date -u +"%Y%m%d%H%M")
+          versionSuffix="$cleanBranch-$utcTimestamp"
+          echo "version-suffix=$versionSuffix" >> $GITHUB_OUTPUT
+          echo "🔖 Version suffix: $versionSuffix"
+        fi
+
+    # Build Release configuration for tag releases
+    - name: Build Release Configuration
+      if: github.ref_type == 'tag'
+      run: dotnet build --configuration Release --no-restore
+
+    # Build Debug configuration for branch releases (if not already built)
+    - name: Build Debug Configuration  
+      if: github.ref_type != 'tag'
+      run: dotnet build --configuration Debug --no-restore
+
+    # Pack packages based on strategy
+    - name: Pack Release Package
+      if: steps.publishing-strategy.outputs.strategy == 'tag-release'
+      run: |
+        echo "📦 Creating Release package..."
+        dotnet pack ${{ env.PROJECT_PATH }} \
+          --configuration Release \
+          --no-build \
+          --include-symbols \
+          --include-source \
+          --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
+          -p:PackageVersion=${{ steps.publishing-strategy.outputs.package-version }}
+
+    - name: Pack Release Debug Package
+      if: steps.publishing-strategy.outputs.strategy == 'tag-release'
+      run: |
+        echo "📦 Creating Release Debug package..."
+        dotnet pack ${{ env.PROJECT_PATH }} \
+          --configuration Debug \
+          --no-build \
+          --include-symbols \
+          --include-source \
+          --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
+          -p:PackageVersion=${{ steps.publishing-strategy.outputs.package-version }}-debug
+
+    - name: Pack Preview Package
+      if: steps.publishing-strategy.outputs.strategy == 'preview-branch'
+      run: |
+        echo "📦 Creating Preview package..."
+        dotnet pack ${{ env.PROJECT_PATH }} \
+          --configuration Debug \
+          --no-build \
+          --include-symbols \
+          --include-source \
+          --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
+          --version-suffix ${{ steps.publishing-strategy.outputs.version-suffix }}
+
+    # Publish packages
+    - name: Publish to GitHub Packages
+      run: |
+        echo "🚀 Publishing packages to GitHub Packages..."
+        dotnet nuget push "${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg" \
+          --source ${{ env.NUGET_SOURCE_URL }} \
+          --api-key ${{ secrets.GITHUB_TOKEN }} \
+          --skip-duplicate
+
+    # Upload artifacts for inspection
+    - name: Upload Package Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: nuget-packages-${{ github.run_number }}
+        path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg
+        retention-days: 30
+
+    - name: Publishing Summary
+      run: |
+        echo "## Package Publishing Summary" >> $GITHUB_STEP_SUMMARY
+        echo "| Aspect | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Strategy | ${{ steps.publishing-strategy.outputs.strategy }} |" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ github.ref_type }}" = "tag" ]; then
+          echo "| Package Version | ${{ steps.publishing-strategy.outputs.package-version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Configurations | Release + Debug |" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "| Version Suffix | ${{ steps.publishing-strategy.outputs.version-suffix }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Configuration | Debug (Preview) |" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "| Repository | GitHub Packages |" >> $GITHUB_STEP_SUMMARY
+        echo "| Status | ✅ Published |" >> $GITHUB_STEP_SUMMARY
+
+  # Show skip message for branch pushes without changes
+  skip-publishing:
+    runs-on: ubuntu-latest
+    needs: [build-and-test, change-detection]
+    if: |
+      github.event_name == 'push' && 
+      github.ref_type != 'tag' && 
+      needs.change-detection.result == 'success' && 
+      needs.change-detection.outputs.has-changes == 'false'
+
+    steps:
+    - name: Skip Publishing Message
+      run: |
+        echo "## ⏭️ Package Publishing Skipped" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Reason:** ${{ needs.change-detection.outputs.comparison-details }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Reference Point:** ${{ needs.change-detection.outputs.previous-reference }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "This prevents duplicate preview packages when there are no functional changes." >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### What Still Happened:" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Code was built and tested" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ All quality checks passed" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Smart change detection completed" >> $GITHUB_STEP_SUMMARY
+        
+        echo "⏭️ Skipping package publishing - no functional changes detected"
+        echo "📝 Reference: ${{ needs.change-detection.outputs.previous-reference }}"
+        echo "📋 Details: ${{ needs.change-detection.outputs.comparison-details }}"
+
+  # Show pull request message  
+  pull-request-info:
+    runs-on: ubuntu-latest
+    needs: [build-and-test]
+    if: github.event_name == 'pull_request'
+
+    steps:
+    - name: Pull Request Summary
+      run: |
+        echo "## 🔍 Pull Request Validation" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Build Status:** ${{ needs.build-and-test.outputs.build-successful == 'true' && '✅ Success' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Test Status:** ${{ needs.build-and-test.outputs.test-successful == 'true' && '✅ Passed' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Note:** Package publishing is disabled for pull requests." >> $GITHUB_STEP_SUMMARY
+        echo "Packages will be published when this PR is merged and changes are detected." >> $GITHUB_STEP_SUMMARY
+        
+        echo "🔍 Pull request detected - building and testing only"
+        echo "📦 Package publishing is disabled for pull requests"

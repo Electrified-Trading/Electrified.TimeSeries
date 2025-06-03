@@ -1,0 +1,90 @@
+name: Change Detection
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        description: 'Path to .csproj file'
+        required: true
+        type: string
+      comparison-script:
+        description: 'PowerShell script for comparison'
+        required: false
+        type: string
+        default: 'scripts/compare-build-output.ps1'
+      dotnet-version:
+        description: '.NET version to use'
+        required: false
+        type: string
+        default: '9.0.x'
+    outputs:
+      has-changes:
+        description: 'Whether functional changes detected'
+        value: ${{ jobs.detect-changes.outputs.has-changes }}
+      comparison-details:
+        description: 'Human-readable comparison result'
+        value: ${{ jobs.detect-changes.outputs.comparison-details }}
+      previous-reference:
+        description: 'Git reference used for comparison'
+        value: ${{ jobs.detect-changes.outputs.previous-reference }}
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      has-changes: ${{ steps.compare.outputs.has-changes }}
+      comparison-details: ${{ steps.compare.outputs.comparison-details }}
+      previous-reference: ${{ steps.compare.outputs.previous-reference }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+        
+    - name: Restore dependencies
+      run: dotnet restore
+      
+    - name: Build for comparison
+      run: |
+        echo "🔨 Building Debug configuration for comparison..."
+        dotnet build --no-restore --configuration Debug
+        
+    - name: Run change detection
+      id: compare
+      shell: pwsh
+      run: |
+        echo "🔍 Running change detection using PowerShell script..."
+        
+        # Run the comparison script
+        $result = & "${{ inputs.comparison-script }}" -ProjectPath "${{ inputs.project-path }}" -Verbose
+        
+        # The script should output structured data
+        # For now, let's use a simple approach and parse the output
+        if ($LASTEXITCODE -eq 0) {
+          echo "has-changes=false" >> $env:GITHUB_OUTPUT
+          echo "comparison-details=No functional changes detected" >> $env:GITHUB_OUTPUT
+          echo "✅ No functional changes detected"
+        } else {
+          echo "has-changes=true" >> $env:GITHUB_OUTPUT
+          echo "comparison-details=Functional changes detected" >> $env:GITHUB_OUTPUT
+          echo "✅ Functional changes detected"
+        }
+        
+        # Try to determine previous reference
+        $previousRef = git describe --tags --abbrev=0 2>$null
+        if (-not $previousRef) {
+          $previousRef = "HEAD~1"
+        }
+        echo "previous-reference=$previousRef" >> $env:GITHUB_OUTPUT
+        echo "📋 Previous reference: $previousRef"

@@ -1,0 +1,77 @@
+name: Build and Test
+
+on:
+  workflow_call:
+    inputs:
+      configuration:
+        description: 'Build configuration (Debug/Release)'
+        required: false
+        type: string
+        default: 'Debug'
+      run-tests:
+        description: 'Whether to run tests'
+        required: false
+        type: boolean
+        default: true
+      dotnet-version:
+        description: '.NET version to use'
+        required: false
+        type: string
+        default: '9.0.x'
+    outputs:
+      build-successful:
+        description: 'Whether build succeeded'
+        value: ${{ jobs.build-test.outputs.build-successful }}
+      test-successful:
+        description: 'Whether tests passed'
+        value: ${{ jobs.build-test.outputs.test-successful }}
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    outputs:
+      build-successful: ${{ steps.build.outcome == 'success' }}
+      test-successful: ${{ steps.test.outcome == 'success' || steps.test.outcome == 'skipped' }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+        
+    - name: Restore dependencies
+      run: dotnet restore
+      
+    - name: Build
+      id: build
+      run: |
+        echo "🔨 Building in ${{ inputs.configuration }} configuration..."
+        dotnet build --no-restore --configuration ${{ inputs.configuration }}
+        echo "✅ Build completed successfully"
+        
+    - name: Test
+      id: test
+      if: inputs.run-tests == true
+      run: |
+        echo "🧪 Running tests..."
+        dotnet test --no-build --configuration ${{ inputs.configuration }} \
+          --verbosity normal \
+          --logger trx \
+          --results-directory TestResults
+        echo "✅ Tests completed successfully"
+        
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always() && inputs.run-tests == true
+      with:
+        name: test-results-${{ inputs.configuration }}-${{ github.run_number }}
+        path: TestResults/*.trx
+        retention-days: 7
