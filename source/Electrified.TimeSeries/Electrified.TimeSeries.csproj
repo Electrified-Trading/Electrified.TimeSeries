@@ -13,7 +13,7 @@
     <PathMap>$(MSBuildProjectDirectory)=.</PathMap>
     <!-- NuGet Package Metadata -->
     <PackageId>Electrified.TimeSeries</PackageId>
-    <VersionPrefix>1.0.1</VersionPrefix>
+    <VersionPrefix>1.0.2</VersionPrefix>
     <Authors>electricessence</Authors>
     <Company>Electrified Trading</Company>
     <Product>Electrified.TimeSeries</Product>
