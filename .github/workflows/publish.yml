@@ -15,8 +15,18 @@ env:
   NUGET_SOURCE_URL: 'https://nuget.pkg.github.com/Electrified-Trading/index.json'
 
 jobs:
+  # ═══════════════════════════════════════════════════════════════════════════════════════
+  # 🏗️ MAIN PIPELINE: BUILD, TEST & PUBLISH
+  # ═══════════════════════════════════════════════════════════════════════════════════════
   pipeline:
     runs-on: ubuntu-latest
+    outputs:
+      build-successful: ${{ steps.build-current.outputs.build-successful }}
+      has-changes: ${{ steps.compare-builds.outputs.has-changes }}
+      previous-build-failed: ${{ steps.build-previous.outputs.previous-build-failed }}
+      previous-ref: ${{ steps.build-previous.outputs.previous-ref }}
+      tag-version: ${{ steps.tag-version.outputs.package-version }}
+      preview-suffix: ${{ steps.preview-version.outputs.version-suffix }}
     steps:
     
     # ═══════════════════════════════════════════════════════════════════════════════════════
@@ -245,78 +255,84 @@ jobs:
         github.ref_type != 'tag' && 
         github.event_name == 'push' && 
         (steps.build-previous.outputs.previous-build-failed == 'true' || 
-         steps.compare-builds.outputs.has-changes == 'true')
-      uses: actions/upload-artifact@v4
+         steps.compare-builds.outputs.has-changes == 'true')      uses: actions/upload-artifact@v4
       with:
         name: preview-packages-${{ github.run_number }}
         path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg
         retention-days: 30
 
-    # ═══════════════════════════════════════════════════════════════════════════════════════
-    # 📊 SECTION 4: SUMMARY & CLEANUP
-    # ═══════════════════════════════════════════════════════════════════════════════════════    # ═══════════════════════════════════════════════════════════════════════════════════════
-    # 📊 SECTION 4: SUMMARY & CLEANUP
-    # ═══════════════════════════════════════════════════════════════════════════════════════
-    
+  # ═══════════════════════════════════════════════════════════════════════════════════════
+  # 📊 SUMMARY & CLEANUP JOB
+  # ═══════════════════════════════════════════════════════════════════════════════════════
+  summary:
+    runs-on: ubuntu-latest
+    needs: pipeline
+    if: always()  # Always run, even if pipeline fails
+    steps:
     - name: Generate Pipeline Summary
-      if: always()
       run: |
         echo "## 🚀 CI/CD Pipeline Results" >> $GITHUB_STEP_SUMMARY
         echo "| Step | Status |" >> $GITHUB_STEP_SUMMARY
         echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
-        echo "| Build | ${{ steps.build-current.outputs.build-successful == 'true' && '✅ Success' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Tests | ${{ job.status == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Build | ${{ needs.pipeline.outputs.build-successful == 'true' && '✅ Success' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Tests | ${{ needs.pipeline.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
         
         # Publishing status based on event and results
         if [ "${{ github.event_name }}" = "pull_request" ]; then
           echo "| Publishing | ⏭️ Skipped (PR) |" >> $GITHUB_STEP_SUMMARY
         elif [ "${{ github.ref_type }}" = "tag" ]; then
           echo "| Publishing | ✅ Tagged Release Published |" >> $GITHUB_STEP_SUMMARY
-          echo "| Version | ${{ steps.tag-version.outputs.package-version }} |" >> $GITHUB_STEP_SUMMARY
-        elif [ "${{ steps.compare-builds.outputs.has-changes }}" = "true" ] || [ "${{ steps.build-previous.outputs.previous-build-failed }}" = "true" ]; then
+          echo "| Version | ${{ needs.pipeline.outputs.tag-version }} |" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ needs.pipeline.outputs.has-changes }}" = "true" ] || [ "${{ needs.pipeline.outputs.previous-build-failed }}" = "true" ]; then
           echo "| Publishing | ✅ Preview Published |" >> $GITHUB_STEP_SUMMARY
-          echo "| Version Suffix | ${{ steps.preview-version.outputs.version-suffix }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version Suffix | ${{ needs.pipeline.outputs.preview-suffix }} |" >> $GITHUB_STEP_SUMMARY
         else
           echo "| Publishing | ⏭️ Skipped (No Changes) |" >> $GITHUB_STEP_SUMMARY
-          if [ -n "${{ steps.build-previous.outputs.previous-ref }}" ]; then
-            echo "| Compared Against | ${{ steps.build-previous.outputs.previous-ref }} |" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ needs.pipeline.outputs.previous-ref }}" ]; then
+            echo "| Compared Against | ${{ needs.pipeline.outputs.previous-ref }} |" >> $GITHUB_STEP_SUMMARY
           fi
         fi
-          # Add flow visualization with major section bubbles
+        
+        # Add flow visualization with major section bubbles
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 🔄 Pipeline Flow - Major Sections" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔄 Pipeline Flow - Major Jobs" >> $GITHUB_STEP_SUMMARY
         if [ "${{ github.event_name }}" = "pull_request" ]; then
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "🏗️ [Build & Test] => 📊 [Summary]" >> $GITHUB_STEP_SUMMARY
-          echo "   (PR - No Publishing Sections)" >> $GITHUB_STEP_SUMMARY
+          echo "🏗️ [Pipeline: Build & Test] => 📊 [Summary]" >> $GITHUB_STEP_SUMMARY
+          echo "   (PR - No Publishing)" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         elif [ "${{ github.ref_type }}" = "tag" ]; then
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "🏗️ [Build & Test] => 🚀 [Tagged Release] => 📊 [Summary]" >> $GITHUB_STEP_SUMMARY
-          echo "   (Section 1)      (Section 2)         (Section 4)" >> $GITHUB_STEP_SUMMARY
+          echo "🏗️ [Pipeline: Build & Test + Tagged Release] => 📊 [Summary]" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-        elif [ "${{ steps.compare-builds.outputs.has-changes }}" = "true" ] || [ "${{ steps.build-previous.outputs.previous-build-failed }}" = "true" ]; then
+        elif [ "${{ needs.pipeline.outputs.has-changes }}" = "true" ] || [ "${{ needs.pipeline.outputs.previous-build-failed }}" = "true" ]; then
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "🏗️ [Build & Test] => 🔍 [Change Detection] => 🔄 [Preview Publishing] => 📊 [Summary]" >> $GITHUB_STEP_SUMMARY
-          echo "   (Section 1)      (Section 1A)         (Section 3)           (Section 4)" >> $GITHUB_STEP_SUMMARY
+          echo "🏗️ [Pipeline: Build & Test + Preview Publishing] => 📊 [Summary]" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         else
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "🏗️ [Build & Test] => 🔍 [Change Detection] => 📊 [Summary]" >> $GITHUB_STEP_SUMMARY
-          echo "   (Section 1)      (Section 1A)         (Section 4)" >> $GITHUB_STEP_SUMMARY
-          echo "   └─ No Changes Detected - Skipped Publishing Sections" >> $GITHUB_STEP_SUMMARY
+          echo "🏗️ [Pipeline: Build & Test] => 📊 [Summary]" >> $GITHUB_STEP_SUMMARY
+          echo "   └─ No Changes - No Publishing" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         fi
         
-        # Add section execution details
+        # Add job execution details
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 📋 Section Execution Details" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 Job Execution Details" >> $GITHUB_STEP_SUMMARY
+        echo "| Job | Status | Purpose |" >> $GITHUB_STEP_SUMMARY
+        echo "|-----|---------|---------|" >> $GITHUB_STEP_SUMMARY
+        echo "| 🏗️ Pipeline | ${{ needs.pipeline.result == 'success' && '✅ Success' || needs.pipeline.result == 'failure' && '❌ Failed' || '⏭️ Skipped' }} | Build, test, and conditional publishing |" >> $GITHUB_STEP_SUMMARY
+        echo "| 📊 Summary | ✅ Success | Generate results summary (always runs) |" >> $GITHUB_STEP_SUMMARY
+        
+        # Add pipeline sections breakdown
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔧 Pipeline Sections Executed" >> $GITHUB_STEP_SUMMARY
         echo "| Section | Status | Notes |" >> $GITHUB_STEP_SUMMARY
         echo "|---------|---------|-------|" >> $GITHUB_STEP_SUMMARY
-        echo "| 🏗️ Build & Test | ✅ Executed | Always runs for all events |" >> $GITHUB_STEP_SUMMARY
+        echo "| 🏗️ Build & Test | ${{ needs.pipeline.outputs.build-successful == 'true' && '✅ Executed' || '❌ Failed' }} | Always runs for all events |" >> $GITHUB_STEP_SUMMARY
         
         if [ "${{ github.event_name }}" != "pull_request" ] && [ "${{ github.ref_type }}" != "tag" ]; then
-          echo "| 🔍 Change Detection | ✅ Executed | Compared against ${{ steps.build-previous.outputs.previous-ref || 'previous commit' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔍 Change Detection | ✅ Executed | Compared against ${{ needs.pipeline.outputs.previous-ref || 'previous commit' }} |" >> $GITHUB_STEP_SUMMARY
         else
           echo "| 🔍 Change Detection | ⏭️ Skipped | Not needed for ${{ github.event_name == 'pull_request' && 'PRs' || 'tagged releases' }} |" >> $GITHUB_STEP_SUMMARY
         fi
@@ -324,12 +340,10 @@ jobs:
         if [ "${{ github.ref_type }}" = "tag" ]; then
           echo "| 🚀 Tagged Release | ✅ Executed | Published Release + Debug packages |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔄 Preview Publishing | ⏭️ Skipped | Not needed for tagged releases |" >> $GITHUB_STEP_SUMMARY
-        elif [ "${{ steps.compare-builds.outputs.has-changes }}" = "true" ] || [ "${{ steps.build-previous.outputs.previous-build-failed }}" = "true" ]; then
+        elif [ "${{ needs.pipeline.outputs.has-changes }}" = "true" ] || [ "${{ needs.pipeline.outputs.previous-build-failed }}" = "true" ]; then
           echo "| 🚀 Tagged Release | ⏭️ Skipped | Not a tagged release |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔄 Preview Publishing | ✅ Executed | Published preview package |" >> $GITHUB_STEP_SUMMARY
         else
           echo "| 🚀 Tagged Release | ⏭️ Skipped | Not a tagged release |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔄 Preview Publishing | ⏭️ Skipped | No changes detected |" >> $GITHUB_STEP_SUMMARY
         fi
-        
-        echo "| 📊 Summary | ✅ Executed | Always runs (even on failure) |" >> $GITHUB_STEP_SUMMARY
