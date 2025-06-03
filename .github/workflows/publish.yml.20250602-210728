@@ -1,0 +1,263 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "develop", "feature/*", "hotfix/*" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: '9.0.x'
+  PROJECT_PATH: 'source/Electrified.TimeSeries/Electrified.TimeSeries.csproj'
+  PACKAGE_OUTPUT_DIRECTORY: ${{ github.workspace }}/output
+  NUGET_SOURCE_URL: 'https://nuget.pkg.github.com/Electrified-Trading/index.json'
+
+jobs:
+  # Single streamlined job - eliminates redundant builds and dependencies
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+    # Step A: Setup and Build
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore Dependencies
+      run: dotnet restore
+
+    - name: Build Current
+      id: build-current
+      run: |
+        echo "🔨 Building current version..."
+        dotnet build --configuration Debug --no-restore
+        if [ $? -eq 0 ]; then
+          echo "build-successful=true" >> $GITHUB_OUTPUT
+          echo "✅ Build successful"
+        else
+          echo "build-successful=false" >> $GITHUB_OUTPUT
+          echo "❌ Build failed"
+          exit 1
+        fi
+
+    # Step B: Test using existing built code
+    - name: Test
+      if: steps.build-current.outputs.build-successful == 'true'
+      run: |
+        echo "🧪 Running tests..."
+        dotnet test --no-build --configuration Debug --logger trx --results-directory TestResults/
+        echo "✅ Tests completed"
+
+    # Step C: Build previous version using worktree (for non-tags only)
+    - name: Build Previous
+      id: build-previous
+      if: github.ref_type != 'tag' && github.event_name == 'push'
+      run: |
+        echo "🔍 Building previous version for comparison..."
+        
+        # Get previous reference
+        latestTag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        if [ -n "$latestTag" ]; then
+          prevRef="$latestTag"
+          echo "📌 Comparing against latest tag: $latestTag"
+        else
+          prevRef="HEAD~1"
+          echo "📌 Comparing against previous commit: HEAD~1"
+        fi
+        
+        echo "previous-ref=$prevRef" >> $GITHUB_OUTPUT
+        
+        # Try to build previous version using worktree
+        git worktree add ../prev-build "$prevRef" 2>/dev/null || {
+          echo "⚠️ Could not create worktree for $prevRef - assuming first commit"
+          echo "previous-build-failed=true" >> $GITHUB_OUTPUT
+          exit 0
+        }
+        
+        cd ../prev-build
+        dotnet restore 2>/dev/null || {
+          echo "⚠️ Previous version restore failed"
+          echo "previous-build-failed=true" >> $GITHUB_OUTPUT
+          cd "$GITHUB_WORKSPACE"
+          git worktree remove ../prev-build --force 2>/dev/null || true
+          exit 0
+        }
+        
+        dotnet build --configuration Debug --no-restore 2>/dev/null || {
+          echo "⚠️ Previous version build failed"
+          echo "previous-build-failed=true" >> $GITHUB_OUTPUT
+          cd "$GITHUB_WORKSPACE"
+          git worktree remove ../prev-build --force 2>/dev/null || true
+          exit 0
+        }
+        
+        echo "previous-build-failed=false" >> $GITHUB_OUTPUT
+        echo "✅ Previous version built successfully"
+        cd "$GITHUB_WORKSPACE"
+
+    # Step D & E: Compare builds if previous succeeded (or skip if failed)
+    - name: Compare Build Outputs
+      id: compare-builds
+      if: |
+        github.ref_type != 'tag' && 
+        github.event_name == 'push' && 
+        steps.build-previous.outputs.previous-build-failed == 'false'
+      run: |
+        echo "🔍 Comparing build outputs..."
+        
+        # Run PowerShell comparison script
+        pwsh -File scripts/compare-build-output.ps1 -Verbose
+        comparisonResult=$?
+        
+        if [ $comparisonResult -eq 0 ]; then
+          echo "has-changes=false" >> $GITHUB_OUTPUT
+          echo "⏭️ No functional changes detected - skipping publish"
+        else
+          echo "has-changes=true" >> $GITHUB_OUTPUT  
+          echo "✅ Changes detected - will publish"
+        fi
+        
+        # Cleanup worktree
+        git worktree remove ../prev-build --force 2>/dev/null || true    # Step E: Publishing Decision - consolidate all publishing logic
+    - name: Publishing Decision
+      id: publish-decision
+      if: github.event_name == 'push'
+      run: |
+        # Determine if we should publish
+        shouldPublish="false"
+        strategy=""
+        reason=""
+        
+        if [ "${{ github.ref_type }}" = "tag" ]; then
+          shouldPublish="true"
+          strategy="tag-release"
+          reason="Tag release"
+          
+          # Extract version from tag
+          tagVersion="${{ github.ref_name }}"
+          packageVersion="${tagVersion#v}"
+          echo "package-version=$packageVersion" >> $GITHUB_OUTPUT
+          echo "🏷️ Version: $packageVersion"
+          
+        elif [ "${{ steps.build-previous.outputs.previous-build-failed }}" = "true" ]; then
+          shouldPublish="true"
+          strategy="preview-branch"
+          reason="Previous build failed - assuming changes"
+          
+        elif [ "${{ steps.compare-builds.outputs.has-changes }}" = "true" ]; then
+          shouldPublish="true"
+          strategy="preview-branch"
+          reason="Changes detected"
+          
+        else
+          shouldPublish="false"
+          reason="No functional changes detected since ${{ steps.build-previous.outputs.previous-ref }}"
+        fi
+        
+        # Set outputs
+        echo "should-publish=$shouldPublish" >> $GITHUB_OUTPUT
+        echo "strategy=$strategy" >> $GITHUB_OUTPUT
+        echo "reason=$reason" >> $GITHUB_OUTPUT
+        
+        # Generate preview version suffix if needed
+        if [ "$strategy" = "preview-branch" ]; then
+          branchName="${{ github.ref_name }}"
+          cleanBranch=$(echo "$branchName" | sed 's/[^a-zA-Z0-9]//g')
+          utcTimestamp=$(date -u +"%Y%m%d%H%M")
+          versionSuffix="$cleanBranch-$utcTimestamp"
+          echo "version-suffix=$versionSuffix" >> $GITHUB_OUTPUT
+          echo "🔖 Suffix: $versionSuffix"
+        fi
+        
+        # Log decision
+        if [ "$shouldPublish" = "true" ]; then
+          echo "📦 Publishing: $reason"
+          echo "📋 Strategy: $strategy"
+        else
+          echo "⏭️ Skipping: $reason"
+          echo "## ⏭️ Publishing Skipped" >> $GITHUB_STEP_SUMMARY
+          echo "**Reason:** $reason" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ✅ Build and tests passed, no publishing needed" >> $GITHUB_STEP_SUMMARY
+        fi    # Step F: Build Release (only for tags, reusing existing Debug build for branches)
+    - name: Build Release
+      if: steps.publish-decision.outputs.strategy == 'tag-release'
+      run: |
+        echo "🔨 Building Release configuration..."
+        dotnet build --configuration Release --no-restore
+
+    - name: Pack
+      if: steps.publish-decision.outputs.should-publish == 'true'
+      run: |
+        mkdir -p ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
+        
+        if [ "${{ steps.publish-decision.outputs.strategy }}" = "tag-release" ]; then
+          echo "📦 Packing Release packages..."
+          # Release package
+          dotnet pack ${{ env.PROJECT_PATH }} \
+            --configuration Release \
+            --no-build \
+            --include-symbols \
+            --include-source \
+            --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
+            -p:PackageVersion=${{ steps.publish-decision.outputs.package-version }}
+          
+          # Debug package for tags
+          dotnet pack ${{ env.PROJECT_PATH }} \
+            --configuration Debug \
+            --no-build \
+            --include-symbols \
+            --include-source \
+            --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
+            -p:PackageVersion=${{ steps.publish-decision.outputs.package-version }}-debug
+        else
+          echo "📦 Packing Preview package..."
+          # Preview package (Debug only)
+          dotnet pack ${{ env.PROJECT_PATH }} \
+            --configuration Debug \
+            --no-build \
+            --include-symbols \
+            --include-source \
+            --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
+            --version-suffix ${{ steps.publish-decision.outputs.version-suffix }}
+        fi
+
+    - name: Publish
+      if: steps.publish-decision.outputs.should-publish == 'true'
+      run: |
+        echo "🚀 Publishing to GitHub Packages..."
+        dotnet nuget push "${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg" \
+          --source ${{ env.NUGET_SOURCE_URL }} \
+          --api-key ${{ secrets.GITHUB_TOKEN }} \
+          --skip-duplicate
+
+    - name: Upload Artifacts
+      if: steps.publish-decision.outputs.should-publish == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: packages-${{ github.run_number }}
+        path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg
+        retention-days: 30    # Step G: Summary and Cleanup
+    - name: Summary
+      if: always()
+      run: |
+        echo "## 🚀 CI/CD Pipeline Results" >> $GITHUB_STEP_SUMMARY
+        echo "| Step | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Build | ${{ steps.build-current.outputs.build-successful == 'true' && '✅ Success' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Tests | ${{ job.status == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          echo "| Publishing | ⏭️ Skipped (PR) |" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ steps.publish-decision.outputs.should-publish }}" != "true" ]; then
+          echo "| Publishing | ⏭️ Skipped (No Changes) |" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "| Publishing | ✅ Published |" >> $GITHUB_STEP_SUMMARY
+          echo "| Strategy | ${{ steps.publish-decision.outputs.strategy }} |" >> $GITHUB_STEP_SUMMARY
+        fi

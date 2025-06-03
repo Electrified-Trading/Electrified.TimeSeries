@@ -15,11 +15,14 @@ env:
   NUGET_SOURCE_URL: 'https://nuget.pkg.github.com/Electrified-Trading/index.json'
 
 jobs:
-  # Single streamlined job - eliminates redundant builds and dependencies
   pipeline:
     runs-on: ubuntu-latest
     steps:
-    # Step A: Setup and Build
+    
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    # 🏗️ SECTION 1: BUILD & TEST
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    
     - name: Checkout
       uses: actions/checkout@v4
       with:
@@ -47,7 +50,6 @@ jobs:
           exit 1
         fi
 
-    # Step B: Test using existing built code
     - name: Test
       if: steps.build-current.outputs.build-successful == 'true'
       run: |
@@ -55,8 +57,11 @@ jobs:
         dotnet test --no-build --configuration Debug --logger trx --results-directory TestResults/
         echo "✅ Tests completed"
 
-    # Step C: Build previous version using worktree (for non-tags only)
-    - name: Build Previous
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    # 🔍 SECTION 1A: CHANGE DETECTION (Non-tag builds only)
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    
+    - name: Build Previous Version for Comparison
       id: build-previous
       if: github.ref_type != 'tag' && github.event_name == 'push'
       run: |
@@ -102,7 +107,6 @@ jobs:
         echo "✅ Previous version built successfully"
         cd "$GITHUB_WORKSPACE"
 
-    # Step D & E: Compare builds if previous succeeded (or skip if failed)
     - name: Compare Build Outputs
       id: compare-builds
       if: |
@@ -118,133 +122,143 @@ jobs:
         
         if [ $comparisonResult -eq 0 ]; then
           echo "has-changes=false" >> $GITHUB_OUTPUT
-          echo "⏭️ No functional changes detected - skipping publish"
+          echo "⏭️ No functional changes detected - jumping to summary"
         else
           echo "has-changes=true" >> $GITHUB_OUTPUT  
-          echo "✅ Changes detected - will publish"
+          echo "✅ Changes detected - proceeding to publish"
         fi
         
         # Cleanup worktree
-        git worktree remove ../prev-build --force 2>/dev/null || true    # Step E: Publishing Decision - consolidate all publishing logic
-    - name: Publishing Decision
-      id: publish-decision
-      if: github.event_name == 'push'
+        git worktree remove ../prev-build --force 2>/dev/null || true
+
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    # 🚀 SECTION 2: TAGGED RELEASE PUBLISHING
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    
+    - name: Tagged Release - Extract Version
+      id: tag-version
+      if: github.ref_type == 'tag' && github.event_name == 'push'
       run: |
-        # Determine if we should publish
-        shouldPublish="false"
-        strategy=""
-        reason=""
-        
-        if [ "${{ github.ref_type }}" = "tag" ]; then
-          shouldPublish="true"
-          strategy="tag-release"
-          reason="Tag release"
-          
-          # Extract version from tag
-          tagVersion="${{ github.ref_name }}"
-          packageVersion="${tagVersion#v}"
-          echo "package-version=$packageVersion" >> $GITHUB_OUTPUT
-          echo "🏷️ Version: $packageVersion"
-          
-        elif [ "${{ steps.build-previous.outputs.previous-build-failed }}" = "true" ]; then
-          shouldPublish="true"
-          strategy="preview-branch"
-          reason="Previous build failed - assuming changes"
-          
-        elif [ "${{ steps.compare-builds.outputs.has-changes }}" = "true" ]; then
-          shouldPublish="true"
-          strategy="preview-branch"
-          reason="Changes detected"
-          
-        else
-          shouldPublish="false"
-          reason="No functional changes detected since ${{ steps.build-previous.outputs.previous-ref }}"
-        fi
-        
-        # Set outputs
-        echo "should-publish=$shouldPublish" >> $GITHUB_OUTPUT
-        echo "strategy=$strategy" >> $GITHUB_OUTPUT
-        echo "reason=$reason" >> $GITHUB_OUTPUT
-        
-        # Generate preview version suffix if needed
-        if [ "$strategy" = "preview-branch" ]; then
-          branchName="${{ github.ref_name }}"
-          cleanBranch=$(echo "$branchName" | sed 's/[^a-zA-Z0-9]//g')
-          utcTimestamp=$(date -u +"%Y%m%d%H%M")
-          versionSuffix="$cleanBranch-$utcTimestamp"
-          echo "version-suffix=$versionSuffix" >> $GITHUB_OUTPUT
-          echo "🔖 Suffix: $versionSuffix"
-        fi
-        
-        # Log decision
-        if [ "$shouldPublish" = "true" ]; then
-          echo "📦 Publishing: $reason"
-          echo "📋 Strategy: $strategy"
-        else
-          echo "⏭️ Skipping: $reason"
-          echo "## ⏭️ Publishing Skipped" >> $GITHUB_STEP_SUMMARY
-          echo "**Reason:** $reason" >> $GITHUB_STEP_SUMMARY
-          echo "**Status:** ✅ Build and tests passed, no publishing needed" >> $GITHUB_STEP_SUMMARY
-        fi    # Step F: Build Release (only for tags, reusing existing Debug build for branches)
-    - name: Build Release
-      if: steps.publish-decision.outputs.strategy == 'tag-release'
+        tagVersion="${{ github.ref_name }}"
+        packageVersion="${tagVersion#v}"
+        echo "package-version=$packageVersion" >> $GITHUB_OUTPUT
+        echo "🏷️ Tag Version: $packageVersion"
+
+    - name: Tagged Release - Build Release Configuration
+      if: github.ref_type == 'tag' && github.event_name == 'push'
       run: |
-        echo "🔨 Building Release configuration..."
+        echo "🔨 Building Release configuration for tag..."
         dotnet build --configuration Release --no-restore
 
-    - name: Pack
-      if: steps.publish-decision.outputs.should-publish == 'true'
+    - name: Tagged Release - Pack Both Configurations
+      if: github.ref_type == 'tag' && github.event_name == 'push'
       run: |
         mkdir -p ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
         
-        if [ "${{ steps.publish-decision.outputs.strategy }}" = "tag-release" ]; then
-          echo "📦 Packing Release packages..."
-          # Release package
-          dotnet pack ${{ env.PROJECT_PATH }} \
-            --configuration Release \
-            --no-build \
-            --include-symbols \
-            --include-source \
-            --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
-            -p:PackageVersion=${{ steps.publish-decision.outputs.package-version }}
-          
-          # Debug package for tags
-          dotnet pack ${{ env.PROJECT_PATH }} \
-            --configuration Debug \
-            --no-build \
-            --include-symbols \
-            --include-source \
-            --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
-            -p:PackageVersion=${{ steps.publish-decision.outputs.package-version }}-debug
-        else
-          echo "📦 Packing Preview package..."
-          # Preview package (Debug only)
-          dotnet pack ${{ env.PROJECT_PATH }} \
-            --configuration Debug \
-            --no-build \
-            --include-symbols \
-            --include-source \
-            --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
-            --version-suffix ${{ steps.publish-decision.outputs.version-suffix }}
-        fi
+        echo "📦 Packing Release package..."
+        dotnet pack ${{ env.PROJECT_PATH }} \
+          --configuration Release \
+          --no-build \
+          --include-symbols \
+          --include-source \
+          --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
+          -p:PackageVersion=${{ steps.tag-version.outputs.package-version }}
+        
+        echo "📦 Packing Debug package..."
+        dotnet pack ${{ env.PROJECT_PATH }} \
+          --configuration Debug \
+          --no-build \
+          --include-symbols \
+          --include-source \
+          --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
+          -p:PackageVersion=${{ steps.tag-version.outputs.package-version }}-debug
 
-    - name: Publish
-      if: steps.publish-decision.outputs.should-publish == 'true'
+    - name: Tagged Release - Publish
+      if: github.ref_type == 'tag' && github.event_name == 'push'
       run: |
-        echo "🚀 Publishing to GitHub Packages..."
+        echo "🚀 Publishing tagged release to GitHub Packages..."
         dotnet nuget push "${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg" \
           --source ${{ env.NUGET_SOURCE_URL }} \
           --api-key ${{ secrets.GITHUB_TOKEN }} \
           --skip-duplicate
 
-    - name: Upload Artifacts
-      if: steps.publish-decision.outputs.should-publish == 'true'
+    - name: Tagged Release - Upload Artifacts
+      if: github.ref_type == 'tag' && github.event_name == 'push'
       uses: actions/upload-artifact@v4
       with:
-        name: packages-${{ github.run_number }}
+        name: tagged-packages-${{ github.run_number }}
         path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg
-        retention-days: 30    # Step G: Summary and Cleanup
-    - name: Summary
+        retention-days: 30
+
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    # 🔄 SECTION 3: PREVIEW PUBLISHING (Changes detected on branches)
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    
+    - name: Preview Publishing - Generate Version Suffix
+      id: preview-version
+      if: |
+        github.ref_type != 'tag' && 
+        github.event_name == 'push' && 
+        (steps.build-previous.outputs.previous-build-failed == 'true' || 
+         steps.compare-builds.outputs.has-changes == 'true')
+      run: |
+        branchName="${{ github.ref_name }}"
+        cleanBranch=$(echo "$branchName" | sed 's/[^a-zA-Z0-9]//g')
+        utcTimestamp=$(date -u +"%Y%m%d%H%M")
+        versionSuffix="$cleanBranch-$utcTimestamp"
+        echo "version-suffix=$versionSuffix" >> $GITHUB_OUTPUT
+        echo "🔖 Preview Version Suffix: $versionSuffix"
+
+    - name: Preview Publishing - Pack Preview Package
+      if: |
+        github.ref_type != 'tag' && 
+        github.event_name == 'push' && 
+        (steps.build-previous.outputs.previous-build-failed == 'true' || 
+         steps.compare-builds.outputs.has-changes == 'true')
+      run: |
+        mkdir -p ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
+        
+        echo "📦 Packing Preview package..."
+        dotnet pack ${{ env.PROJECT_PATH }} \
+          --configuration Debug \
+          --no-build \
+          --include-symbols \
+          --include-source \
+          --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
+          --version-suffix ${{ steps.preview-version.outputs.version-suffix }}
+
+    - name: Preview Publishing - Publish
+      if: |
+        github.ref_type != 'tag' && 
+        github.event_name == 'push' && 
+        (steps.build-previous.outputs.previous-build-failed == 'true' || 
+         steps.compare-builds.outputs.has-changes == 'true')
+      run: |
+        echo "🚀 Publishing preview package to GitHub Packages..."
+        dotnet nuget push "${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg" \
+          --source ${{ env.NUGET_SOURCE_URL }} \
+          --api-key ${{ secrets.GITHUB_TOKEN }} \
+          --skip-duplicate
+
+    - name: Preview Publishing - Upload Artifacts
+      if: |
+        github.ref_type != 'tag' && 
+        github.event_name == 'push' && 
+        (steps.build-previous.outputs.previous-build-failed == 'true' || 
+         steps.compare-builds.outputs.has-changes == 'true')
+      uses: actions/upload-artifact@v4
+      with:
+        name: preview-packages-${{ github.run_number }}
+        path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg
+        retention-days: 30
+
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    # 📊 SECTION 4: SUMMARY & CLEANUP
+    # ═══════════════════════════════════════════════════════════════════════════════════════    # ═══════════════════════════════════════════════════════════════════════════════════════
+    # 📊 SECTION 4: SUMMARY & CLEANUP
+    # ═══════════════════════════════════════════════════════════════════════════════════════
+    
+    - name: Generate Pipeline Summary
       if: always()
       run: |
         echo "## 🚀 CI/CD Pipeline Results" >> $GITHUB_STEP_SUMMARY
@@ -253,11 +267,39 @@ jobs:
         echo "| Build | ${{ steps.build-current.outputs.build-successful == 'true' && '✅ Success' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
         echo "| Tests | ${{ job.status == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
         
+        # Publishing status based on event and results
         if [ "${{ github.event_name }}" = "pull_request" ]; then
           echo "| Publishing | ⏭️ Skipped (PR) |" >> $GITHUB_STEP_SUMMARY
-        elif [ "${{ steps.publish-decision.outputs.should-publish }}" != "true" ]; then
-          echo "| Publishing | ⏭️ Skipped (No Changes) |" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ github.ref_type }}" = "tag" ]; then
+          echo "| Publishing | ✅ Tagged Release Published |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ steps.tag-version.outputs.package-version }} |" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ steps.compare-builds.outputs.has-changes }}" = "true" ] || [ "${{ steps.build-previous.outputs.previous-build-failed }}" = "true" ]; then
+          echo "| Publishing | ✅ Preview Published |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version Suffix | ${{ steps.preview-version.outputs.version-suffix }} |" >> $GITHUB_STEP_SUMMARY
         else
-          echo "| Publishing | ✅ Published |" >> $GITHUB_STEP_SUMMARY
-          echo "| Strategy | ${{ steps.publish-decision.outputs.strategy }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Publishing | ⏭️ Skipped (No Changes) |" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ steps.build-previous.outputs.previous-ref }}" ]; then
+            echo "| Compared Against | ${{ steps.build-previous.outputs.previous-ref }} |" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi
+        
+        # Add flow visualization
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔄 Pipeline Flow" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "[Build & Test] => [Summary] (PR - No Publishing)" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ github.ref_type }}" = "tag" ]; then
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "[Build & Test] => [Tagged Release] => [Summary]" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ steps.compare-builds.outputs.has-changes }}" = "true" ] || [ "${{ steps.build-previous.outputs.previous-build-failed }}" = "true" ]; then
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "[Build & Test] => [Change Detection] => [Preview Publishing] => [Summary]" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "[Build & Test] => [Change Detection] => [Summary] (No Changes)" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         fi
