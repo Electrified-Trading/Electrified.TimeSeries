@@ -282,54 +282,24 @@ jobs:
             echo "| Compared Against | ${{ steps.build-previous.outputs.previous-ref }} |" >> $GITHUB_STEP_SUMMARY
           fi
         fi
-          # Add flow visualization with major section bubbles
+        
+        # Add flow visualization
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 🔄 Pipeline Flow - Major Sections" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔄 Pipeline Flow" >> $GITHUB_STEP_SUMMARY
         if [ "${{ github.event_name }}" = "pull_request" ]; then
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "🏗️ [Build & Test] => 📊 [Summary]" >> $GITHUB_STEP_SUMMARY
-          echo "   (PR - No Publishing Sections)" >> $GITHUB_STEP_SUMMARY
+          echo "[Build & Test] => [Summary] (PR - No Publishing)" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         elif [ "${{ github.ref_type }}" = "tag" ]; then
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "🏗️ [Build & Test] => 🚀 [Tagged Release] => 📊 [Summary]" >> $GITHUB_STEP_SUMMARY
-          echo "   (Section 1)      (Section 2)         (Section 4)" >> $GITHUB_STEP_SUMMARY
+          echo "[Build & Test] => [Tagged Release] => [Summary]" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         elif [ "${{ steps.compare-builds.outputs.has-changes }}" = "true" ] || [ "${{ steps.build-previous.outputs.previous-build-failed }}" = "true" ]; then
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "🏗️ [Build & Test] => 🔍 [Change Detection] => 🔄 [Preview Publishing] => 📊 [Summary]" >> $GITHUB_STEP_SUMMARY
-          echo "   (Section 1)      (Section 1A)         (Section 3)           (Section 4)" >> $GITHUB_STEP_SUMMARY
+          echo "[Build & Test] => [Change Detection] => [Preview Publishing] => [Summary]" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         else
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "🏗️ [Build & Test] => 🔍 [Change Detection] => 📊 [Summary]" >> $GITHUB_STEP_SUMMARY
-          echo "   (Section 1)      (Section 1A)         (Section 4)" >> $GITHUB_STEP_SUMMARY
-          echo "   └─ No Changes Detected - Skipped Publishing Sections" >> $GITHUB_STEP_SUMMARY
+          echo "[Build & Test] => [Change Detection] => [Summary] (No Changes)" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         fi
-        
-        # Add section execution details
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 📋 Section Execution Details" >> $GITHUB_STEP_SUMMARY
-        echo "| Section | Status | Notes |" >> $GITHUB_STEP_SUMMARY
-        echo "|---------|---------|-------|" >> $GITHUB_STEP_SUMMARY
-        echo "| 🏗️ Build & Test | ✅ Executed | Always runs for all events |" >> $GITHUB_STEP_SUMMARY
-        
-        if [ "${{ github.event_name }}" != "pull_request" ] && [ "${{ github.ref_type }}" != "tag" ]; then
-          echo "| 🔍 Change Detection | ✅ Executed | Compared against ${{ steps.build-previous.outputs.previous-ref || 'previous commit' }} |" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "| 🔍 Change Detection | ⏭️ Skipped | Not needed for ${{ github.event_name == 'pull_request' && 'PRs' || 'tagged releases' }} |" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        if [ "${{ github.ref_type }}" = "tag" ]; then
-          echo "| 🚀 Tagged Release | ✅ Executed | Published Release + Debug packages |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🔄 Preview Publishing | ⏭️ Skipped | Not needed for tagged releases |" >> $GITHUB_STEP_SUMMARY
-        elif [ "${{ steps.compare-builds.outputs.has-changes }}" = "true" ] || [ "${{ steps.build-previous.outputs.previous-build-failed }}" = "true" ]; then
-          echo "| 🚀 Tagged Release | ⏭️ Skipped | Not a tagged release |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🔄 Preview Publishing | ✅ Executed | Published preview package |" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "| 🚀 Tagged Release | ⏭️ Skipped | Not a tagged release |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🔄 Preview Publishing | ⏭️ Skipped | No changes detected |" >> $GITHUB_STEP_SUMMARY
-        fi
-        
-        echo "| 📊 Summary | ✅ Executed | Always runs (even on failure) |" >> $GITHUB_STEP_SUMMARY
