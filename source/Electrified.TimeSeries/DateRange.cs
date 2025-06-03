@@ -1,4 +1,4 @@
-﻿namespace Electrified.TimeSeries;
+namespace Electrified.TimeSeries;
 
 /// <summary>
 /// Represents a range of dates from a start date to an end date.

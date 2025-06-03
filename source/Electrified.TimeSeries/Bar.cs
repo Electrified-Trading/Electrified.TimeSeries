@@ -14,7 +14,9 @@ public record Bar<T> : IComparable<Bar<T>>
 	/// <summary>
 	/// Gets the financial data of the bar.
 	/// </summary>
-	public required T Data { get; init; }	/// <summary>
+	public required T Data { get; init; }
+
+	/// <summary>
 	/// Gets the trading volume of the bar.
 	/// </summary>
 	public required decimal Volume { get; init; }
@@ -53,6 +55,9 @@ public record Bar<T> : IComparable<Bar<T>>
 	}
 }
 
+/// <summary>
+/// Provides factory methods for creating Bar instances.
+/// </summary>
 public static class Bar
 {
 	/// <summary>
@@ -62,7 +67,7 @@ public static class Bar
 	/// <param name="data">The data of the bar</param>
 	/// <param name="volume">The volume of the bar</param>
 	/// <returns>A new bar instance</returns>
-	public static Bar<T> Create<T>(DateTime dateTime, T data, long volume) => new()
+	public static Bar<T> Create<T>(DateTime dateTime, T data, decimal volume) => new()
 	{
 		Timestamp = dateTime,
 		Data = data,

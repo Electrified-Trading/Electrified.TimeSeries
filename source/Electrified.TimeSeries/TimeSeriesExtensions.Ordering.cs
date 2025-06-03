@@ -1,8 +1,11 @@
 using Electrified.TimeSeries;
 using System.Runtime.CompilerServices;
 
-namespace AlphaHawk.Models;
+namespace Electrified.TimeSeries;
 
+/// <summary>
+/// Extension methods for enforcing chronological ordering in time series data.
+/// </summary>
 public static partial class ModelExtensions
 {
 	/// <summary>
@@ -38,15 +41,15 @@ public static partial class ModelExtensions
 	public static bool IsChronologicallyOrdered<TData>(this IEnumerable<Bar<TData>> source)
 	{
 		DateTime? lastTimestamp = null;
-		
+
 		foreach (var bar in source)
 		{
 			if (lastTimestamp.HasValue && bar.Timestamp <= lastTimestamp.Value)
 				return false;
-				
+
 			lastTimestamp = bar.Timestamp;
 		}
-		
+
 		return true;
 	}
 	/// <summary>
@@ -59,13 +62,13 @@ public static partial class ModelExtensions
 	{
 		Bar<TData>? first = null;
 		Bar<TData>? last = null;
-		
+
 		foreach (var bar in source)
 		{
 			first ??= bar;
 			last = bar;
 		}
-		
+
 		return first is not null && last is not null ? last.Timestamp - first.Timestamp : null;
 	}
 

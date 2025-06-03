@@ -1,7 +1,7 @@
-namespace AlphaHawk.Models;
+namespace Electrified.TimeSeries;
 
 /// <summary>
-/// Extension methods for models in the AlphaHawk.Models namespace
+/// Extension methods for time series data processing and manipulation.
 /// </summary>
 public static partial class ModelExtensions
 {
