@@ -111,8 +111,7 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           git worktree remove ../prev-build --force 2>/dev/null || true
           exit 0
-        }
-        
+        }        
         echo "previous-build-failed=false" >> $GITHUB_OUTPUT
         echo "✅ Previous version built successfully"
         cd "$GITHUB_WORKSPACE"
@@ -129,6 +128,8 @@ jobs:
         # Run PowerShell comparison script
         pwsh -File scripts/compare-build-output.ps1 -Verbose
         comparisonResult=$?
+        
+        echo "DEBUG: PowerShell exit code: $comparisonResult"
         
         if [ $comparisonResult -eq 0 ]; then
           echo "has-changes=false" >> $GITHUB_OUTPUT
