@@ -1,7 +1,9 @@
 namespace Electrified.TimeSeries;
 
 /// <summary>
-/// Defines different timeframes for financial data aggregation.
+/// Defines different timeframes for financial data aggregation. Non-negative values are
+/// whole days; negative values are intraday and count minutes (e.g. <see cref="Minute5"/>
+/// is 5 minutes), the sign distinguishing the two families from a single integer.
 /// </summary>
 public enum Timeframe
 {
@@ -33,5 +35,30 @@ public enum Timeframe
 	/// <summary>
 	/// Minute timeframe.
 	/// </summary>
-	Minute = -1
+	Minute = -1,
+
+	/// <summary>
+	/// 5-minute intraday timeframe.
+	/// </summary>
+	Minute5 = -5,
+
+	/// <summary>
+	/// 15-minute intraday timeframe.
+	/// </summary>
+	Minute15 = -15,
+
+	/// <summary>
+	/// 30-minute intraday timeframe.
+	/// </summary>
+	Minute30 = -30,
+
+	/// <summary>
+	/// Hourly intraday timeframe.
+	/// </summary>
+	Hour = -60,
+
+	/// <summary>
+	/// 4-hour intraday timeframe.
+	/// </summary>
+	Hour4 = -240
 }

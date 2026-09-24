@@ -72,6 +72,45 @@ public readonly record struct DateRange
 	}
 
 	/// <summary>
+	/// Gets the blocks that make up this date range for the given <paramref name="timeframe"/>
+	/// (§7.3): one block per calendar year for <see cref="Timeframe.Daily"/>,
+	/// <see cref="Timeframe.Weekly"/>, <see cref="Timeframe.Monthly"/> and
+	/// <see cref="Timeframe.Annualy"/>; one block per calendar month for the intraday
+	/// (negative) timeframes.
+	/// </summary>
+	/// <param name="timeframe">The timeframe whose block size determines how this range is split</param>
+	/// <returns>An enumerable of date ranges, one per block</returns>
+	/// <exception cref="ArgumentOutOfRangeException">Thrown when timeframe is <see cref="Timeframe.None"/></exception>
+	public IEnumerable<DateRange> GetBlocks(Timeframe timeframe)
+	{
+		if (timeframe == Timeframe.None)
+			throw new ArgumentOutOfRangeException(nameof(timeframe));
+
+		return timeframe < 0
+			? GetMonthBlocks()
+			: GetBlocks();
+	}
+
+	private IEnumerable<DateRange> GetMonthBlocks()
+	{
+		var current = Start;
+
+	loop:
+		var monthEnd = new DateOnly(current.Year, current.Month, DateTime.DaysInMonth(current.Year, current.Month));
+		if (current.Year == End.Year && current.Month == End.Month)
+		{
+			yield return new(current, End);
+			yield break;
+		}
+
+		yield return new(current, monthEnd);
+
+		current = monthEnd.AddDays(1);
+		goto loop;
+
+	}
+
+	/// <summary>
 	/// Returns a string representation of the date range, with special handling for complete periods.
 	/// <list type="bullet">
 	/// <item>Full year: "2023" for Jan 1 to Dec 31</item>

@@ -99,14 +99,15 @@ public readonly record struct SymbolDataKey : ISymbolTimeframe
 		=> new(source.Symbol, source.Timeframe);
 
 	/// <summary>
-	/// Gets the blocks that make up this symbol data key's range.
+	/// Gets the blocks that make up this symbol data key's range, sized per its own
+	/// <see cref="Timeframe"/> (§7.3): one block per calendar year for daily/weekly/
+	/// monthly/annual data, one block per calendar month for intraday data.
 	/// </summary>
 	/// <returns>An enumerable of symbol data keys, where each represents a block of data</returns>
 	public IEnumerable<SymbolDataKey> GetBlocks()
 	{
-		// For now, we assume that a block is full year.
-		var e = Range.GetBlocks().GetEnumerator();
-		if (!e.MoveNext()) throw new UnreachableException("Range.GetBlocks() returned no blocks, which is unexpected.");
+		var e = Range.GetBlocks(Timeframe).GetEnumerator();
+		if (!e.MoveNext()) throw new UnreachableException("Range.GetBlocks(Timeframe) returned no blocks, which is unexpected.");
 		var block = e.Current;
 		if (block == Range)
 		{
