@@ -114,7 +114,7 @@ public readonly record struct SymbolDataKey : ISymbolTimeframe
 			yield break;
 		}
 
-		do { yield return new SymbolDataKey(Symbol, Timeframe, block); }
+		do { yield return new SymbolDataKey(Symbol, Timeframe, e.Current); }
 		while (e.MoveNext());
 	}
 }
