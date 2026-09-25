@@ -25,10 +25,11 @@
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageProjectUrl>https://github.com/Electrified-Trading/Electrified.TimeSeries</PackageProjectUrl>
     <!-- Symbol and Documentation -->
-    <IncludeSymbols>true</IncludeSymbols>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <!-- The PDB is embedded in the DLL (DebugType=embedded), so a separate symbols package would
+         contain no PDB and nuget.org rejects it. Symbols ship inside the main package. -->
+    <IncludeSymbols>false</IncludeSymbols>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <GeneratePackageOnBuild Condition="'$(Configuration)' == 'Release'">true</GeneratePackageOnBuild>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Primitives" Version="9.0.11" />
