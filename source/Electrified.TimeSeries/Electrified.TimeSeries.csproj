@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <!-- Deterministic and reproducible builds for consistent hash comparison -->
@@ -13,7 +13,7 @@
     <PathMap>$(MSBuildProjectDirectory)=.</PathMap>
     <!-- NuGet Package Metadata -->
     <PackageId>Electrified.TimeSeries</PackageId>
-    <VersionPrefix>1.0.2</VersionPrefix>
+    <VersionPrefix>1.1.0</VersionPrefix>
     <Authors>electricessence</Authors>
     <Company>Electrified Trading</Company>
     <Product>Electrified.TimeSeries</Product>
@@ -31,6 +31,6 @@
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Open.Text" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Primitives" Version="9.0.11" />
   </ItemGroup>
 </Project>
